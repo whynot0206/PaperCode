@@ -1,0 +1,171 @@
+import os  # 导入操作系统接口模块
+import sys  # 导入系统相关参数和函数模块
+
+sys.path.append(os.getcwd())  # 将当前工作目录添加到系统路径
+import argparse  # 导入命令行参数解析模块
+import torch  # 导入PyTorch深度学习框架
+import uer.trainer as trainer  # 导入UER训练器模块
+from uer.utils.config import load_hyperparam  # 从UER导入超参数加载函数
+from uer.opts import *  # 从UER导入所有选项
+
+
+def main():  # 主函数
+    parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)  # 创建参数解析器
+
+    # Path options.
+    parser.add_argument("--dataset_path", type=str, default="dataset.pt",  # 添加数据集路径参数
+                        help="Path of the preprocessed dataset.")  # 帮助信息：预处理数据集的路径
+    parser.add_argument("--vocab_path", default=None, type=str,  # 添加词汇表路径参数
+                        help="Path of the vocabulary file.")  # 帮助信息：词汇表文件的路径
+    parser.add_argument("--spm_model_path", default=None, type=str,  # 添加句子片段模型路径参数
+                        help="Path of the sentence piece model.")  # 帮助信息：句子片段模型的路径
+    parser.add_argument("--tgt_vocab_path", default=None, type=str,  # 添加目标词汇表路径参数
+                        help="Path of the target vocabulary file.")  # 帮助信息：目标词汇表文件的路径
+    parser.add_argument("--tgt_spm_model_path", default=None, type=str,  # 添加目标句子片段模型路径参数
+                        help="Path of the target sentence piece model.")  # 帮助信息：目标句子片段模型的路径
+    parser.add_argument("--pretrained_model_path", type=str, default=None,  # 添加预训练模型路径参数
+                        help="Path of the pretrained model.")  # 帮助信息：预训练模型的路径
+    parser.add_argument("--output_model_path", type=str, required=True,  # 添加输出模型路径参数（必需）
+                        help="Path of the output model.")  # 帮助信息：输出模型的路径
+    parser.add_argument("--config_path", type=str, default="models/bert/base_config.json",
+                        # define the model   # 添加配置文件路径参数
+                        help="Config file of model hyper-parameters.")  # 帮助信息：模型超参数的配置文件
+
+    # Training and saving options.
+    parser.add_argument("--total_steps", type=int, default=100000,  # 添加总训练步数参数
+                        help="Total training steps.")  # 帮助信息：总训练步数
+    parser.add_argument("--save_checkpoint_steps", type=int, default=10000,  # 添加保存检查点步数参数
+                        help="Specific steps to save model checkpoint.")  # 帮助信息：保存模型检查点的特定步数
+    parser.add_argument("--report_steps", type=int, default=100,  # 添加报告步数参数
+                        help="Specific steps to print prompt.")  # 帮助信息：打印提示的特定步数
+    parser.add_argument("--accumulation_steps", type=int, default=1,  # 添加梯度累积步数参数
+                        help="Specific steps to accumulate gradient.")  # 帮助信息：累积梯度的特定步数
+    parser.add_argument("--batch_size", type=int, default=32,  # 添加批次大小参数
+                        help="Training batch size. The actual batch_size is [batch_size x world_size x accumulation_steps].")  # 帮助信息：训练批次大小，实际批次大小为[batch_size x world_size x accumulation_steps]
+    parser.add_argument("--instances_buffer_size", type=int, default=25600,  # 添加实例缓冲区大小参数
+                        help="The buffer size of instances in memory.")  # 帮助信息：内存中实例的缓冲区大小
+    parser.add_argument("--labels_num", type=int, required=False,  # 添加标签数量参数
+                        help="Number of prediction labels.")  # 帮助信息：预测标签的数量
+    parser.add_argument("--dropout", type=float, default=0.1, help="Dropout value.")  # 添加dropout参数
+    parser.add_argument("--seed", type=int, default=7, help="Random seed.")  # 添加随机种子参数
+
+    # Preprocess options.
+    parser.add_argument("--tokenizer", choices=["bert", "char", "space"], default="bert",  # 添加分词器参数
+                        help="Specify the tokenizer."  # 帮助信息：指定分词器
+                             "Original Google BERT uses bert tokenizer on Chinese corpus."  # 原始Google BERT在中文语料上使用bert分词器
+                             "Char tokenizer segments sentences into characters."  # 字符分词器将句子分割成字符
+                             "Space tokenizer segments sentences into words according to space."  # 空格分词器根据空格将句子分割成单词
+                        )
+
+    # Model options.
+    model_opts(parser)  # 添加模型选项
+    parser.add_argument("--tgt_embedding", choices=["word", "word_pos", "word_pos_seg", "word_sinusoidalpos"],
+                        default="word_pos_seg",  # 添加目标嵌入参数
+                        help="Target embedding type.")  # 帮助信息：目标嵌入类型
+    parser.add_argument("--decoder", choices=["transformer"], default="transformer", help="Decoder type.")  # 添加解码器类型参数
+    parser.add_argument("--pooling", choices=["mean", "max", "first", "last"], default="first",  # 添加池化方式参数
+                        help="Pooling type.")  # 帮助信息：池化类型
+    parser.add_argument("--target",
+                        choices=["bert", "bertflow", "lm", "mlm", "bilm", "albert", "seq2seq", "t5", "cls", "prefixlm"],
+                        default="bert",  # 添加预训练目标参数
+                        help="The training target of the pretraining model.")  # 帮助信息：预训练模型的训练目标
+    parser.add_argument("--tie_weights", action="store_true",  # 添加权重绑定参数
+                        help="Tie the word embedding and softmax weights.")  # 帮助信息：绑定词嵌入和softmax权重
+    parser.add_argument("--has_lmtarget_bias", action="store_true",  # 添加语言模型目标偏置参数
+                        help="Add bias on output_layer for lm target.")  # 帮助信息：为语言模型目标在输出层添加偏置
+
+    # MOE Model Options
+    parser.add_argument("--is_moe", action="store_true", help="adopt moe layer.")  # 添加是否使用MOE层参数
+    parser.add_argument("--vocab_size", type=int, required=False, help="Number of vocab.")  # 添加词汇表大小参数
+    parser.add_argument("--moebert_expert_dim", type=int, required=False, default=3072,
+                        help="Dim of expert,default is ffn.")  # 添加MOE专家维度参数
+    parser.add_argument("--moebert_expert_num", type=int, required=False, help="Number of expert.")  # 添加MOE专家数量参数
+    parser.add_argument("--moebert_route_method",
+                        choices=["gate-token", "gate-sentence", "hash-random", "hash-balance", "proto"],
+                        default="hash-random",  # 添加MOE路由方法参数
+                        help="moebert route method.")  # 帮助信息：MOE路由方法
+    parser.add_argument("--moebert_route_hash_list", default=None, type=str,
+                        help="Path of moebert hash list file.")  # 添加MOE哈希列表路径参数
+    parser.add_argument("--moebert_load_balance", type=float, default=0.0, help="gate loss weight.")  # 添加MOE负载平衡参数
+
+    # Masking options.
+    parser.add_argument("--whole_word_masking", action="store_true", help="Whole word masking.")  # 添加全词掩码参数
+    parser.add_argument("--span_masking", action="store_true", help="Span masking.")  # 添加跨度掩码参数
+    parser.add_argument("--span_geo_prob", type=float, default=0.2,  # 添加跨度几何概率参数
+                        help="Hyperparameter of geometric distribution for span masking.")  # 帮助信息：跨度掩码的几何分布超参数
+    parser.add_argument("--span_max_length", type=int, default=10,  # 添加跨度最大长度参数
+                        help="Max length for span masking.")  # 帮助信息：跨度掩码的最大长度
+
+    # Optimizer options.
+    optimization_opts(parser)  # 添加优化器选项
+
+    # GPU options.
+    parser.add_argument("--world_size", type=int, default=1,
+                        help="Total number of processes (GPUs) for training.")  # 添加世界大小参数（进程/GPU数量）
+    parser.add_argument("--gpu_ranks", default=[], nargs='+', type=int,
+                        help="List of ranks of each process."  # 添加GPU排名参数
+                             " Each process has a unique integer rank whose value is in the interval [0, world_size), and runs in a single GPU.")  # 帮助信息：每个进程的排名列表，每个进程有一个唯一的整数排名，值在[0, world_size)区间内，并在单个GPU中运行
+    parser.add_argument("--master_ip", default="tcp://localhost:12345", type=str,
+                        help="IP-Port of master for training.")  # 添加主节点IP端口参数
+    parser.add_argument("--backend", choices=["nccl", "gloo"], default="nccl", type=str,
+                        help="Distributed backend.")  # 添加分布式后端参数
+
+    args = parser.parse_args()  # 解析参数
+
+    if args.target == "cls":  # 如果目标是分类
+        assert args.labels_num is not None, "Cls target needs the denotation of the number of labels."  # 断言标签数量不为空，分类目标需要标签数量的说明
+
+    # Load hyper-parameters from config file.
+    if args.config_path:  # 如果有配置文件路径
+        load_hyperparam(args)  # 从配置文件加载超参数
+
+    ranks_num = len(args.gpu_ranks)  # 获取GPU排名数量
+
+    if args.world_size > 1:  # 如果世界大小大于1（分布式训练）
+        # Multiprocessing distributed mode.
+        assert torch.cuda.is_available(), "No available GPUs."  # 断言有可用的GPU
+        assert ranks_num <= args.world_size, "Started processes exceed `world_size` upper limit."  # 断言启动的进程不超过世界大小上限
+        assert ranks_num <= torch.cuda.device_count(), "Started processes exceeds the available GPUs."  # 断言启动的进程不超过可用GPU数量
+        args.dist_train = True  # 设置分布式训练标志
+        args.ranks_num = ranks_num  # 设置排名数量
+        print("Using distributed mode for training.")  # 打印使用分布式训练模式信息
+    elif args.world_size == 1 and ranks_num == 1:  # 如果世界大小为1且排名数量为1（单GPU训练）
+        # Single GPU mode.
+        assert torch.cuda.is_available(), "No available GPUs."  # 断言有可用的GPU
+        args.gpu_id = args.gpu_ranks[0]  # 设置GPU ID
+        print("args.gpu_id:", args.gpu_id)  # 打印GPU ID
+        print("torch.cuda.device_count,", torch.cuda.device_count())  # 打印GPU设备数量
+        assert args.gpu_id < torch.cuda.device_count(), "Invalid specified GPU device."  # 断言指定的GPU设备有效
+        args.dist_train = False  # 设置分布式训练标志为False
+        args.single_gpu = True  # 设置单GPU标志
+        print("Using GPU %d for training." % args.gpu_id)  # 打印使用哪个GPU进行训练
+    else:  # 其他情况（CPU训练）
+        # CPU mode.
+        assert ranks_num == 0, "GPUs are specified, please check the arguments."  # 断言排名数量为0，如果指定了GPU请检查参数
+        args.dist_train = False  # 设置分布式训练标志为False
+        args.single_gpu = False  # 设置单GPU标志为False
+        print("Using CPU mode for training.")  # 打印使用CPU训练模式信息
+
+    trainer.train_and_validate(args)  # 调用训练和验证函数
+
+
+if __name__ == "__main__":  # 如果是主程序
+    main()  # 调用主函数
+
+'''
+python3 pre-training/pretrain.py \
+        --dataset_path data_generation/data/pretrain_dataset.pt \
+        --vocab_path models/encryptd_vocab.txt \
+        --output_model_path models/pretrain_model_bert.bin \
+        --config_path models/bert/base_config.json \
+        --world_size 1 \
+        --gpu_ranks 0 \
+        --total_steps 90000 \
+        --save_checkpoint_steps 10000 \
+        --batch_size 64 \
+        --embedding word_pos_seg \
+        --encoder transformer \
+        --mask fully_visible \
+        --target bert \
+        --learning_rate 1e-4
+'''
