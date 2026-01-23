@@ -108,7 +108,8 @@ def split_cap(pcap_split_path, pcap_file_path, pcap_name, pcap_label='', split_w
         cmd = f'"{splitcap_exe}" -r "{input_file}" -s {split_way} -o "{output_dir}"'
     else:
         # Linux/Mac下使用mono执行
-        cmd = f'mono ./SplitCap.exe -r "{input_file}" -s {split_way} -o "{output_dir} " -p 500'
+        # cmd = f'mono ./SplitCap.exe -r "{input_file}" -s {split_way} -o "{output_dir} " -p 500'
+        cmd = f'mono ./SplitCap.exe -r "{input_file}" -s {split_way} -o "{output_dir}" -p 500'
 
     print(f"执行命令: {cmd}")
 

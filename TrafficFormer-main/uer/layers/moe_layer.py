@@ -10,9 +10,10 @@ class MoELayer(nn.Module):
     def __init__(self, hidden_size, num_experts, expert, route_method, vocab_size, hash_list):
         nn.Module.__init__(self)
         self.num_experts = num_experts
-        # parser.add_argument
-        # ("--moebert_expert_num", type=int, required=False, help="Number of expert.")
+
         # 通过命令行来设置专家数量
+        parser.add_argument("--moebert_expert_num", type=int, required=False, help="Number of expert.")
+
 
         self.experts = nn.ModuleList([copy.deepcopy(expert) for i in range(num_experts)])
         self.route_method = route_method
