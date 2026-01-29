@@ -81,7 +81,7 @@ def main():  # 主函数
                         help="Dim of expert,default is ffn.")  # 添加MOE专家维度参数
     parser.add_argument("--moebert_expert_num", type=int, required=False, help="Number of expert.")  # 添加MOE专家数量参数
     parser.add_argument("--moebert_route_method",
-                        choices=["gate-token", "gate-sentence", "hash-random", "hash-balance", "proto"],
+                        choices=["gate-token", "feature-gate", "feature-gate-top2", "gate-sentence", "hash-random", "hash-balance", "proto"],
                         default="hash-random",  # 添加MOE路由方法参数
                         help="moebert route method.")  # 帮助信息：MOE路由方法
     parser.add_argument("--moebert_route_hash_list", default=None, type=str,

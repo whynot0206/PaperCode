@@ -96,3 +96,21 @@ if __name__ == "__main__":  # 如果是主程序
     --target bert \
     --seq_length 320
 '''
+'''python pre-training/preprocess.py \
+    --corpus_path data_generation/data/pretrain/corpus_bigram.txt \
+    --vocab_path models/encryptd_vocab.txt \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --target bertflow \
+    --processes_num 80 \
+    --seq_length 512 \
+'''
+
+'''
+python pre-training/preprocess.py \
+    --corpus_path data_generation/data/pretrain/corpus_bigram.txt \
+    --vocab_path models/encryptd_vocab.txt \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --target bertflow \
+    --processes_num 32 \
+    --seq_length 512 \
+'''
