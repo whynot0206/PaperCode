@@ -117,63 +117,63 @@ class Trainer(object):  # 定义训练器基类
             else:  # 如果不使用混合精度训练
                 loss.backward()  # 执行反向传播
 
+                # 如果达到报告间隔步数且
+                if self.current_step % self.report_steps == 0 and \
+                        (not self.dist_train or (self.dist_train and rank == 0)):  # （非分布式或分布式且rank为0）
+
+                    # ====== DDP 兼容：统一获取 raw model ======
+                    raw_model = model.module if hasattr(model, "module") else model
+
+                    # ====== 调试信息：显示当前模型类型 ======
+                    print(f"  [DEBUG] Current model type: {type(raw_model).__name__}")
+                    if hasattr(raw_model, "encoder"):
+                        print(f"  [DEBUG] Encoder type: {type(raw_model.encoder).__name__}")
+                    else:
+                        print(f"  [DEBUG] No encoder found in model")
+
+                    # ====== 打印 Macro-MoE Router 使用情况 ======
+                    router_found = False
+                    if hasattr(raw_model, "encoder"):
+                        if hasattr(raw_model.encoder, "router"):
+                            router = raw_model.encoder.router
+                            usage = router.usage_counter.cpu().tolist()
+                            total = sum(usage) + 1e-6
+                            usage_ratio = [u / total for u in usage]
+
+                            print("  [MoE Router Usage] count =", usage)
+                            print("  [MoE Router Usage] ratio =", ["{:.3f}".format(r) for r in usage_ratio])
+
+                            # ====== 打印后立刻 reset，形成滑动窗口统计 ======
+                            router.reset_usage()
+                            router_found = True
+                        else:
+                            print(f"  [DEBUG] Encoder has no router attribute")
+
+                    if not router_found:
+                        print("  [INFO] Current model is not MacroMoE, skipping router usage stats")
+
+                    # ====== 打印 Expert Backbone 梯度范数 ======
+                    experts_found = False
+                    if hasattr(raw_model, "encoder"):
+                        if hasattr(raw_model.encoder, "experts"):
+                            print("  [MoE Expert Grad Norms]")
+                            for i, expert in enumerate(raw_model.encoder.experts):
+                                grad_norm = expert.get_backbone_grad_norm()
+                                print(f"    Expert-{i}: grad_norm = {grad_norm:.6f}")
+                            experts_found = True
+                        else:
+                            print(f"  [DEBUG] Encoder has no experts attribute")
+
+                    if not experts_found:
+                        print("  [INFO] Current model has no experts, skipping grad norm stats")
+
+                    self.report_and_reset_stats()  # 报告并重置统计信息
+                    self.start_time = time.time()  # 重置开始时间
+
             if self.current_step % self.accumulation_steps == 0:  # 如果达到梯度累积步数
                 optimizer.step()  # 更新模型参数
                 scheduler.step()  # 更新学习率
                 model.zero_grad()  # 清空梯度
-
-            # 如果达到报告间隔步数且
-            if self.current_step % self.report_steps == 0 and \
-                    (not self.dist_train or (self.dist_train and rank == 0)):  # （非分布式或分布式且rank为0）
-
-                # ====== DDP 兼容：统一获取 raw model ======
-                raw_model = model.module if hasattr(model, "module") else model
-
-                # ====== 调试信息：显示当前模型类型 ======
-                print(f"  [DEBUG] Current model type: {type(raw_model).__name__}")
-                if hasattr(raw_model, "encoder"):
-                    print(f"  [DEBUG] Encoder type: {type(raw_model.encoder).__name__}")
-                else:
-                    print(f"  [DEBUG] No encoder found in model")
-
-                # ====== 打印 Macro-MoE Router 使用情况 ======
-                router_found = False
-                if hasattr(raw_model, "encoder"):
-                    if hasattr(raw_model.encoder, "router"):
-                        router = raw_model.encoder.router
-                        usage = router.usage_counter.cpu().tolist()
-                        total = sum(usage) + 1e-6
-                        usage_ratio = [u / total for u in usage]
-
-                        print("  [MoE Router Usage] count =", usage)
-                        print("  [MoE Router Usage] ratio =", ["{:.3f}".format(r) for r in usage_ratio])
-
-                        # ====== 打印后立刻 reset，形成滑动窗口统计 ======
-                        router.reset_usage()
-                        router_found = True
-                    else:
-                        print(f"  [DEBUG] Encoder has no router attribute")
-
-                if not router_found:
-                    print("  [INFO] Current model is not MacroMoE, skipping router usage stats")
-
-                # ====== 打印 Expert Backbone 梯度范数 ======
-                experts_found = False
-                if hasattr(raw_model, "encoder"):
-                    if hasattr(raw_model.encoder, "experts"):
-                        print("  [MoE Expert Grad Norms]")
-                        for i, expert in enumerate(raw_model.encoder.experts):
-                            grad_norm = expert.get_backbone_grad_norm()
-                            print(f"    Expert-{i}: grad_norm = {grad_norm:.6f}")
-                        experts_found = True
-                    else:
-                        print(f"  [DEBUG] Encoder has no experts attribute")
-
-                if not experts_found:
-                    print("  [INFO] Current model has no experts, skipping grad norm stats")
-
-                self.report_and_reset_stats()  # 报告并重置统计信息
-                self.start_time = time.time()  # 重置开始时间
 
             # 如果达到保存检查点间隔步数且
             if self.current_step % self.save_checkpoint_steps == 0 and \
