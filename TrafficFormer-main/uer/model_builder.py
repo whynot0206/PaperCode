@@ -3,28 +3,31 @@ from uer.layers import *
 from uer.encoders import *
 from uer.targets import *
 from uer.models.model import Model
-# [New Code] Import Macro MoE Encoder
+# [新增] 引入 MacroMoEEncoder
 from uer.macro_moe.encoder import MacroMoEEncoder
 
 
 def build_model(args):
     """
     Build universial encoder representations models.
+    The combinations of different embedding, encoder,
+    and target layers yield pretrained models of different
+    properties.
+    We could select suitable one for downstream tasks.
     """
+
     embedding = str2embedding[args.embedding](args, len(args.vocab))
 
-    # [New Code] Check for Macro MoE Encoder
+    # [新增] 处理 macro_moe 参数
     if args.encoder == "macro_moe":
         encoder = MacroMoEEncoder(args)
-
-        # Check if we are in few-shot adaptation stage
+        # 检查是否处于小样本适配阶段
         if hasattr(args, "few_shot_stage") and args.few_shot_stage:
-            print("Mode: Few-shot Adaptation (Freezing Backbones...)")
+            print(f"Loading MacroMoE: Few-shot Adaptation Mode (Backbones Frozen, Adapters Active)")
             encoder.set_adaptation_mode(True)
         else:
-            print("Mode: Pre-training or Full Fine-tuning (Backbones Active)")
+            print(f"Loading MacroMoE: Pre-training/Full Fine-tuning Mode (Backbones Active)")
             encoder.set_adaptation_mode(False)
-
     else:
         encoder = str2encoder[args.encoder](args)
 

@@ -1,5 +1,6 @@
 def model_opts(parser):
-    parser.add_argument("--embedding", choices=["word", "word_pos", "word_pos_seg", "word_sinusoidalpos"], default="word_pos_seg",
+    parser.add_argument("--embedding", choices=["word", "word_pos", "word_pos_seg", "word_sinusoidalpos"],
+                        default="word_pos_seg",
                         help="Emebdding type.")
     parser.add_argument("--max_seq_length", type=int, default=512,
                         help="Max sequence length for word embedding.")
@@ -11,6 +12,7 @@ def model_opts(parser):
                         help="Remove layernorm on embedding.")
     parser.add_argument("--remove_attention_scale", action="store_true",
                         help="Remove attention scale.")
+    # [修改] 添加 macro_moe 选项
     parser.add_argument("--encoder", choices=["transformer", "rnn", "lstm", "gru",
                                               "birnn", "bilstm", "bigru",
                                               "gatedcnn", "macro_moe"],
@@ -26,8 +28,17 @@ def model_opts(parser):
     parser.add_argument("--layernorm", choices=["normal", "t5"], default="normal",
                         help="Layernorm type.")
     parser.add_argument("--bidirectional", action="store_true", help="Specific to recurrent model.")
-    parser.add_argument("--factorized_embedding_parameterization", action="store_true", help="Factorized embedding parameterization.")
+    parser.add_argument("--factorized_embedding_parameterization", action="store_true",
+                        help="Factorized embedding parameterization.")
     parser.add_argument("--parameter_sharing", action="store_true", help="Parameter sharing.")
+
+    # [新增] Macro MoE 核心参数
+    parser.add_argument("--macro_expert_num", type=int, default=4,
+                        help="Number of macro experts in Macro MoE.")
+    parser.add_argument("--adapter_size", type=int, default=64,
+                        help="Hidden size of the few-shot adapter.")
+    parser.add_argument("--few_shot_stage", action='store_true',
+                        help="If true, freeze backbone and only train adapters.")
 
 
 def optimization_opts(parser):
@@ -37,7 +48,7 @@ def optimization_opts(parser):
                         help="Warm up value.")
     parser.add_argument("--fp16", action='store_true',
                         help="Whether to use 16-bit (mixed) precision (through NVIDIA apex) instead of 32-bit.")
-    parser.add_argument("--fp16_opt_level", choices=["O0", "O1", "O2", "O3" ], default='O1',
+    parser.add_argument("--fp16_opt_level", choices=["O0", "O1", "O2", "O3"], default='O1',
                         help="For fp16: Apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
                              "See details at https://nvidia.github.io/apex/amp.html")
     parser.add_argument("--optimizer", choices=["adamw", "adafactor"],
@@ -49,17 +60,17 @@ def optimization_opts(parser):
 
 
 def training_opts(parser):
-    parser.add_argument("--batch_size", type=int, default=32,                                                             
-                        help="Batch size.")                                                                               
-    parser.add_argument("--seq_length", type=int, default=128,                                                            
-                        help="Sequence length.")                                                                          
-    parser.add_argument("--dropout", type=float, default=0.5,                                                             
-                        help="Dropout.")                                                                                  
-    parser.add_argument("--epochs_num", type=int, default=3,                                                              
-                        help="Number of epochs.")                                                                         
-    parser.add_argument("--report_steps", type=int, default=100,                                                          
-                        help="Specific steps to print prompt.")                                                           
-    parser.add_argument("--seed", type=int, default=7,                                                                    
+    parser.add_argument("--batch_size", type=int, default=32,
+                        help="Batch size.")
+    parser.add_argument("--seq_length", type=int, default=128,
+                        help="Sequence length.")
+    parser.add_argument("--dropout", type=float, default=0.5,
+                        help="Dropout.")
+    parser.add_argument("--epochs_num", type=int, default=3,
+                        help="Number of epochs.")
+    parser.add_argument("--report_steps", type=int, default=100,
+                        help="Specific steps to print prompt.")
+    parser.add_argument("--seed", type=int, default=7,
                         help="Random seed.")
 
 

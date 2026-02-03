@@ -114,3 +114,13 @@ python pre-training/preprocess.py \
     --processes_num 32 \
     --seq_length 512 \
 '''
+'''
+nohup python -u pre-training/preprocess.py \
+     --corpus_path data_generation/data/pretrain/corpus_bigram.txt \
+     --vocab_path models/encryptd_vocab.txt \
+     --dataset_path data_generation/data/pretrain_dataset.pt \
+     --target bertflow \
+     --processes_num 80 \
+     --seq_length 512 \
+     > why_preprocess_32.log 2>&1 &
+'''

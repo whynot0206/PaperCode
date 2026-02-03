@@ -58,6 +58,20 @@ class TrafficMacroExpert(nn.Module):
             self.backbone.train()
             self.adapter.eval()
 
+    def get_backbone_grad_norm(self):
+        """
+        用于观测 Backbone 是否真的在被训练
+        返回 backbone 所有参数梯度的 L2 norm
+        """
+        total_sq_norm = 0.0
+        for p in self.backbone.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2).item()
+                total_sq_norm += param_norm ** 2
+
+        # L2 Norm = sqrt(sum ||g_i||^2)
+        return total_sq_norm ** 0.5
+
     def forward(self, emb, seg):
         # 1. 骨干提取特征
         if self.adaptation_mode:

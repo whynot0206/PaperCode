@@ -24,22 +24,21 @@ class Model(nn.Module):
         if args.target == 't5' and args.share_embedding:
             self.target.embedding.word_embedding.weight = self.embedding.word_embedding.weight
 
-        self.is_moe = args.is_moe
+        # 检查是否使用了 MoE (微观)
+        self.is_moe = getattr(args, "is_moe", False)
 
     def forward(self, src, tgt, seg, proto=None):
         emb = self.embedding(src, seg)
 
-        # [Modify] Enhanced logic to support Macro MoE
-        if self.is_moe:  # Original Micro-MoE
+        # [修改] 分支逻辑，确保传递 src 和 proto 给 MacroMoEEncoder
+        if self.is_moe:
             output, gate_loss = self.encoder(emb, seg, src, proto)
             loss_info = self.target(output, tgt) + (gate_loss,)
-
-        elif "MacroMoEEncoder" in self.encoder.__class__.__name__:  # Our New Macro-MoE
-            # Pass src (input_ids) and proto for routing
+        elif "MacroMoEEncoder" in self.encoder.__class__.__name__:
+            # 显式传递 input_ids (src) 和 proto
             output = self.encoder(emb, seg, input_ids=src, proto=proto)
             loss_info = self.target(output, tgt)
-
-        else:  # Standard Transformer
+        else:
             output = self.encoder(emb, seg)
             loss_info = self.target(output, tgt)
 

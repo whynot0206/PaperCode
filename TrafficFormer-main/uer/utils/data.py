@@ -10,6 +10,7 @@ from uer.utils.seed import set_seed  # 导入设置随机种子的函数
 import os
 import pickle
 
+
 # 该函数用于对输入序列进行掩码处理，支持三种掩码策略：
 # 单词级掩码、片段掩码和普通掩码。它会随机选择一定比例的 token 进行替换（替换为 [MASK]、随机词或保持不变），
 # 并返回掩码后的序列和掩码位置及原始 token 的列表。
@@ -225,6 +226,7 @@ def merge_dataset(dataset_path, workers_num):
 
     dataset_writer.close()
     print("Dataset merging complete.")
+
 
 # 对两个序列进行截断，使它们的总长度不超过指定值。随机从较长序列中删除 token，直到满足长度要求。
 def truncate_seq_pair(tokens_a, tokens_b, max_num_tokens):
