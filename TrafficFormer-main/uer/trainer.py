@@ -229,7 +229,7 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         self.total_correct_mlm = 0.0  # 初始化MLM任务总正确预测数
         self.total_denominator = 0.0  # 初始化MLM任务总分母数
         self.load_balance_alpha = args.moebert_load_balance  # 设置MoE负载均衡系数
-        self.is_moe = args.is_moe  # 设置是否使用MoE模型
+        # self.is_moe = args.is_moe  # 设置是否使用MoE模型
 
     def forward_propagation(self, batch, model):  # 定义BERT前向传播
         debug_mode = False  # 设置调试模式为False

@@ -24,22 +24,25 @@ class Model(nn.Module):
         if args.target == 't5' and args.share_embedding:
             self.target.embedding.word_embedding.weight = self.embedding.word_embedding.weight
 
-        # 检查是否使用了 MoE (微观)
         self.is_moe = getattr(args, "is_moe", False)
 
     def forward(self, src, tgt, seg, proto=None):
         emb = self.embedding(src, seg)
 
-        # [修改] 分支逻辑，确保传递 src 和 proto 给 MacroMoEEncoder
-        if self.is_moe:
+        # [修改] 只有 MacroMoEEncoder 会返回 tuple (output, loss)
+        if "MacroMoEEncoder" in self.encoder.__class__.__name__:
+            output, gate_loss = self.encoder(emb, seg, input_ids=src, proto=proto)
+        elif self.is_moe:
             output, gate_loss = self.encoder(emb, seg, src, proto)
-            loss_info = self.target(output, tgt) + (gate_loss,)
-        elif "MacroMoEEncoder" in self.encoder.__class__.__name__:
-            # 显式传递 input_ids (src) 和 proto
-            output = self.encoder(emb, seg, input_ids=src, proto=proto)
-            loss_info = self.target(output, tgt)
         else:
             output = self.encoder(emb, seg)
-            loss_info = self.target(output, tgt)
+            gate_loss = 0.0
 
-        return loss_info
+        # 计算任务损失
+        loss_info = self.target(output, tgt)
+
+        # [修改] 将 gate_loss 附加到返回的元组末尾
+        if isinstance(loss_info, tuple):
+            return loss_info + (gate_loss,)
+        else:
+            return loss_info, gate_loss

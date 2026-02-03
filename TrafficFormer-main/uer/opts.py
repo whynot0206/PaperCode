@@ -40,6 +40,9 @@ def model_opts(parser):
     parser.add_argument("--few_shot_stage", action='store_true',
                         help="If true, freeze backbone and only train adapters.")
 
+    # [新增] 负载均衡损失系数
+    parser.add_argument("--load_balance_alpha", type=float, default=0.01,
+                        help="Weight for the load balancing auxiliary loss.")
 
 def optimization_opts(parser):
     parser.add_argument("--learning_rate", type=float, default=2e-5,
