@@ -228,8 +228,10 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         self.total_loss_mlm = 0.0  # 初始化MLM任务总损失
         self.total_correct_mlm = 0.0  # 初始化MLM任务总正确预测数
         self.total_denominator = 0.0  # 初始化MLM任务总分母数
+        self.total_gate_loss = 0.0
         self.load_balance_alpha = args.moebert_load_balance  # 设置MoE负载均衡系数
-        # self.is_moe = args.is_moe  # 设置是否使用MoE模型
+        self.is_moe = getattr(args, "is_moe", False)  # 确保 is_moe 属性存在
+        self.is_macro_moe = (args.encoder == "macro_moe")  # 添加 macro_moe 标志
 
     def forward_propagation(self, batch, model):  # 定义BERT前向传播
         debug_mode = False  # 设置调试模式为False
@@ -244,48 +246,70 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
             src, tgt_mlm, tgt_sp, seg = batch  # 解包批次数据：输入序列、MLM目标、句子对目标、段落标记
             loss_info = model(src, (tgt_mlm, tgt_sp), seg)  # 调用模型前向传播
 
-        if self.is_moe:  # 如果使用MoE模型
-            loss_mlm, loss_sp, correct_mlm, correct_sp, denominator, gate_loss = loss_info  # 解包损失信息（含门控损失）
-        else:  # 如果不使用MoE模型
-            loss_mlm, loss_sp, correct_mlm, correct_sp, denominator = loss_info  # 解包损失信息
-            gate_loss = 0.0  # 设置门控损失为0
-        loss = loss_mlm / 10 + loss_sp + self.load_balance_alpha * gate_loss  # 计算总损失（MLM损失缩放+句子对损失+门控损失）
-        self.total_loss += loss.item()  # 累加总损失
-        self.total_loss_mlm += loss_mlm.item()  # 累加MLM损失
-        self.total_loss_sp += loss_sp.item()  # 累加句子对损失
-        self.total_correct_mlm += correct_mlm.item()  # 累加MLM正确预测数
-        self.total_correct_sp += correct_sp.item()  # 累加句子对正确预测数
-        self.total_denominator += denominator.item()  # 累加MLM分母数
-        self.total_instances += src.size(0)  # 累加总实例数
-        loss = loss / self.accumulation_steps  # 根据梯度累积步数缩放损失
-        return loss  # 返回缩放后的损失
+        if self.is_moe or self.is_macro_moe:
+            loss_mlm, loss_sp, correct_mlm, correct_sp, denominator, gate_loss = loss_info
+        else:
+            # 注意：由于你的 model.py 总是返回 + (gate_loss,)，
+            # 如果跑普通 BERT，进入这个 else 分支会报错 (ValueError: too many values to unpack)。
+            # 临时解决方法是让 else 分支也接收 gate_loss 并忽略它，或者确保上面的 if 覆盖所有情况。
 
-    def report_and_reset_stats(self):  # 定义BERT报告和重置统计信息
-        done_tokens = self.batch_size * self.seq_length * self.report_steps  # 计算已处理的token数
-        if self.dist_train:  # 如果是分布式训练
-            done_tokens *= self.world_size  # 乘以世界大小得到总token数
+            # 建议的兼容写法（既能跑 MoE 也能跑普通 BERT）：
+            if len(loss_info) == 6:
+                loss_mlm, loss_sp, correct_mlm, correct_sp, denominator, gate_loss = loss_info
+            else:
+                loss_mlm, loss_sp, correct_mlm, correct_sp, denominator = loss_info
+                gate_loss = 0.0
 
-        print("| {:8d}/{:8d} steps"  # 打印训练进度信息
-              "| {:3.3f} s"  # 打印时间信息
-              "| {:8.2f} tokens/s"  # 打印处理速度
-              "| loss {:7.2f}"  # 打印总平均损失
-              "| loss_mlm: {:3.3f}"  # 打印MLM平均损失
-              "| loss_sp: {:3.3f}"  # 打印句子对平均损失
-              "| acc_mlm: {:3.3f}"  # 打印MLM准确率
-              "| acc_sp: {:3.3f}".format(  # 打印句子对准确率
-            self.current_step,  # 当前步数
-            self.total_steps,  # 总步数
-            (time.time() - self.start_time),  # 计算经过的时间
-            done_tokens / (time.time() - self.start_time),  # 计算每秒处理的token数
-            self.total_loss / self.report_steps,  # 计算总平均损失
-            self.total_loss_mlm / self.report_steps,  # 计算MLM平均损失
-            self.total_loss_sp / self.report_steps,  # 计算句子对平均损失
-            self.total_correct_mlm / self.total_denominator,  # 计算MLM准确率
-            self.total_correct_sp / self.total_instances))  # 计算句子对准确率
+            # ... (计算总 loss)
+            # 确保 load_balance_alpha 已定义，否则这里用 args.load_balance_alpha
+        loss = loss_mlm / 10 + loss_sp + self.load_balance_alpha * gate_loss
+        self.total_loss += loss.item()
 
-        self.total_loss, self.total_loss_mlm, self.total_loss_sp = 0.0, 0.0, 0.0  # 重置所有损失
-        self.total_correct_mlm, self.total_denominator = 0.0, 0.0  # 重置MLM统计信息
-        self.total_correct_sp, self.total_instances = 0.0, 0.0  # 重置句子对统计信息
+        # [Fix 2] 安全地累加 gate_loss (处理 float 和 Tensor 两种情况)
+        if isinstance(gate_loss, torch.Tensor):
+            self.total_gate_loss += gate_loss.item()
+        else:
+            self.total_gate_loss += gate_loss
+
+        self.total_loss_mlm += loss_mlm.item()
+        self.total_loss_sp += loss_sp.item()
+        self.total_correct_mlm += correct_mlm.item()
+        self.total_correct_sp += correct_sp.item()
+        self.total_denominator += denominator.item()
+        self.total_instances += src.size(0)
+
+        loss = loss / self.accumulation_steps
+        return loss
+
+    def report_and_reset_stats(self):
+        done_tokens = self.batch_size * self.seq_length * self.report_steps
+        if self.dist_train:
+            done_tokens *= self.world_size
+
+        print("| {:8d}/{:8d} steps"
+              "| {:3.3f} s"
+              "| {:8.2f} tokens/s"
+              "| loss {:7.2f}"
+              "| gate_loss: {:3.3f}"  # 打印位置正确
+              "| loss_mlm: {:3.3f}"
+              "| loss_sp: {:3.3f}"
+              "| acc_mlm: {:3.3f}"
+              "| acc_sp: {:3.3f}".format(
+            self.current_step,
+            self.total_steps,
+            (time.time() - self.start_time),
+            done_tokens / (time.time() - self.start_time),
+            self.total_loss / self.report_steps,
+            self.total_gate_loss / self.report_steps,  # 计算逻辑正确
+            self.total_loss_mlm / self.report_steps,
+            self.total_loss_sp / self.report_steps,
+            self.total_correct_mlm / self.total_denominator,
+            self.total_correct_sp / self.total_instances))
+
+        # [Fix 3] 必须重置 total_gate_loss
+        self.total_loss, self.total_loss_mlm, self.total_loss_sp, self.total_gate_loss = 0.0, 0.0, 0.0, 0.0
+        self.total_correct_mlm, self.total_denominator = 0.0, 0.0
+        self.total_correct_sp, self.total_instances = 0.0, 0.0
 
 
 class AlbertTrainer(BertTrainer):  # 定义ALBERT任务训练器，继承自BertTrainer
@@ -463,8 +487,10 @@ def worker(proc_id, gpu_ranks, args, model):  # 定义工作进程函数
     param_optimizer = list(model.named_parameters())  # 获取所有模型参数名称和值
     no_decay = ["bias", "gamma", "beta"]  # 定义不进行权重衰减的参数名称
     optimizer_grouped_parameters = [  # 分组优化器参数
-        {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay_rate": 0.01},  # 应用权重衰减的参数
-        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay_rate": 0.0}  # 不应用权重衰减的参数
+        {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay_rate": 0.01},
+        # 应用权重衰减的参数
+        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay_rate": 0.0}
+        # 不应用权重衰减的参数
     ]
     if args.optimizer in ["adamw"]:  # 如果使用AdamW优化器
         optimizer = str2optimizer[args.optimizer](optimizer_grouped_parameters, lr=args.learning_rate,
@@ -477,13 +503,15 @@ def worker(proc_id, gpu_ranks, args, model):  # 定义工作进程函数
     elif args.scheduler in ["constant_with_warmup"]:  # 如果使用带热身的常量学习率调度器
         scheduler = str2scheduler[args.scheduler](optimizer, args.total_steps * args.warmup)  # 创建带热身的常量学习率调度器实例
     else:  # 如果使用其他学习率调度器
-        scheduler = str2scheduler[args.scheduler](optimizer, args.total_steps * args.warmup, args.total_steps)  # 创建其他学习率调度器实例
+        scheduler = str2scheduler[args.scheduler](optimizer, args.total_steps * args.warmup,
+                                                  args.total_steps)  # 创建其他学习率调度器实例
 
     if args.fp16:  # 如果使用混合精度训练
         try:  # 尝试导入apex库
             from apex import amp  # 导入apex混合精度训练库
         except ImportError:  # 如果导入失败
-            raise ImportError("Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")  # 提示安装apex
+            raise ImportError(
+                "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")  # 提示安装apex
         model, optimizer = amp.initialize(model, optimizer, opt_level=args.fp16_opt_level)  # 初始化混合精度训练
         args.amp = amp  # 将amp实例保存到args中
 
