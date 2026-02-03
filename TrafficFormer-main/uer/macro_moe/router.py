@@ -10,6 +10,16 @@ class ProtocolRouter(nn.Module):
         # [修改] 添加可学习的门控层
         self.gate = nn.Linear(hidden_size, num_experts)
 
+        # 2. 【修复点】补回 usage_counter buffer，否则 trainer 会报错
+        self.register_buffer(
+            "usage_counter",
+            torch.zeros(num_experts, dtype=torch.long)
+        )
+
+    def reset_usage(self):
+        """【修复点】Trainer 需要调用此方法重置统计"""
+        self.usage_counter.zero_()
+
     def forward(self, proto_ids=None, inputs_embeds=None):
         """
         Args:
