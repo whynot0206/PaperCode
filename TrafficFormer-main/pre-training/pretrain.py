@@ -86,7 +86,7 @@ def main():  # 主函数
                         help="moebert route method.")  # 帮助信息：MOE路由方法
     parser.add_argument("--moebert_route_hash_list", default=None, type=str,
                         help="Path of moebert hash list file.")  # 添加MOE哈希列表路径参数
-    parser.add_argument("--moebert_load_balance", type=float, default=0.0, help="gate loss weight.")  # 添加MOE负载平衡参数
+    parser.add_argument("--moebert_load_balance", type=float, default=0.1, help="gate loss weight.")  # 添加MOE负载平衡参数
 
     # Masking options.
     parser.add_argument("--whole_word_masking", action="store_true", help="Whole word masking.")  # 添加全词掩码参数
@@ -280,4 +280,25 @@ python3 pre-training/pretrain.py \
     --mask fully_visible \
     --target bertflow \
     --learning_rate 6e-5
+'''
+'''
+第三次参数调整
+python3 pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 
 '''
