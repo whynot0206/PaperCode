@@ -8,50 +8,77 @@ class ProtocolRouter(nn.Module):
         super(ProtocolRouter, self).__init__()
         self.num_experts = num_experts
 
-        # 1. 门控层
+        # 1. 门控层 (Gating Network) - 对应 Formula 5
+        # 用于将输入特征映射到专家权重
         self.gate = nn.Linear(hidden_size, num_experts)
 
-        # 【新增优化】将参数初始化为很小的值，保证初始概率接近均匀 (1/N)
-        nn.init.normal_(self.gate.weight, mean=0.0, std=0.01)
-        nn.init.constant_(self.gate.bias, 0.0)
-
-        # 2. 统计 Buffer
+        # 统计 Buffer (用于日志打印)
         self.register_buffer("usage_counter", torch.zeros(num_experts, dtype=torch.long))
 
     def reset_usage(self):
         self.usage_counter.zero_()
 
-    def forward(self, proto_ids=None, inputs_embeds=None):
-        # inputs_embeds: [batch_size, seq_len, hidden_size]
+    def forward(self, proto_ids=None, inputs_embeds=None, top_k=1):
+        """
+        实现 Traffic-MoE 的 Formula 5 (Routing) 和 Formula 9 (Aux Loss)
+        """
+        # [batch_size, hidden_size]
+        # 使用 [CLS] 或 mean pooling 作为路由特征
         router_input = inputs_embeds[:, 0, :]
 
+        # ================= Formula 5: Routing Logic =================
         # 1. 计算 Logits
         router_logits = self.gate(router_input)
 
-        # 【新增优化】训练阶段加入噪声 (Noisy Gating)
-        # 这能防止初始化时的“赢者通吃”，强迫探索其他专家
+        # 2. 加上微量噪声 (Standard Trick, 可选但推荐)
+        # 帮助打破训练初期的平局，防止死锁。幅度不用太大。
         if self.training:
-            # 产生标准正态分布噪声，幅度设为 1.0 (可调，通常 1/num_experts 左右)
-            noise = torch.randn_like(router_logits) * (1.0 / self.num_experts)
-            # 加上噪声再做 softmax
-            # 使用 Softplus 保证噪声幅度平滑 (可选，这里简化直接加)
-            router_logits = router_logits + noise
+            router_logits = router_logits + torch.randn_like(router_logits) * 0.05
 
-        # 2. 计算概率
-        router_probs = F.softmax(router_logits, dim=-1)
+        # 3. 计算路由概率 (Prob_e)
+        router_probs = F.softmax(router_logits, dim=-1)  # [batch_size, num_experts]
 
-        # 3. 选择专家
-        _, expert_indices = torch.max(router_probs, dim=-1)
+        # 4. 选择 Top-k 专家
+        # values: [batch_size, k], indices: [batch_size, k]
+        # 如果是预训练，通常 k=1；论文中 Inference 用了 k=2
+        _, expert_indices = torch.topk(router_probs, k=top_k, dim=-1)
 
-        # 4. 【修复点】更新统计 (务必确保这一段在代码里！)
+        # 为了兼容你现有的 Encoder 代码 (期待 [batch_size])，如果 k=1 我们 squeeze 掉最后一维
+        if top_k == 1:
+            expert_indices = expert_indices.squeeze(-1)
+
+        # ================= Formula 9: Load Balancing Loss =================
+        # L_aux = N * sum(Load_e * Prob_e)
+
+        # a. Prob_e: 每个专家被选中的平均概率 (Continuous)
+        # [num_experts]
+        prob_per_expert = router_probs.mean(dim=0)
+
+        # b. Load_e: 每个专家实际接收到的样本比例 (Discrete)
+        # 我们使用 one_hot 技巧来计算实际的 Load
+        # 结果维度: [batch_size, num_experts]
+        if top_k == 1:
+            mask = F.one_hot(expert_indices, num_classes=self.num_experts).float()
+        else:
+            # 如果是 Top-k，只要在 indices 里出现了就算选中
+            mask = F.one_hot(expert_indices, num_classes=self.num_experts).float().sum(dim=1)
+
+        # [num_experts]
+        fraction_per_expert = mask.mean(dim=0)
+
+        # c. 计算 Loss
+        # 这就是 Formula 9 的核心：点积求和 * N
+        # 这种 Loss 鼓励 prob 和 fraction 向量都接近均匀分布 [1/N, ..., 1/N]
+        load_balance_loss = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
+
+        # ================= 统计更新 =================
         with torch.no_grad():
-            # 确保 expert_indices 和 usage_counter 在同一设备
-            for i in range(self.num_experts):
-                self.usage_counter[i] += (expert_indices == i).sum()
-
-        # 5. 计算 Loss (MSE 迫使平均概率趋向 1/N)
-        mean_probs = router_probs.mean(dim=0)
-        target_probs = torch.full_like(mean_probs, 1.0 / self.num_experts)
-        load_balance_loss = F.mse_loss(mean_probs, target_probs) * self.num_experts
+            # 统计这一轮每个专家实际吃了多少数据
+            if top_k == 1:
+                for i in range(self.num_experts):
+                    self.usage_counter[i] += (expert_indices == i).sum()
+            else:
+                for i in range(self.num_experts):
+                    self.usage_counter[i] += (expert_indices == i).any(dim=-1).sum()
 
         return expert_indices, load_balance_loss
