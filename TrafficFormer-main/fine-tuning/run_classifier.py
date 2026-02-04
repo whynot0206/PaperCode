@@ -22,13 +22,16 @@ from uer.opts import finetune_opts  # 从UER导入微调选项
 import tqdm  # 导入进度条显示模块
 import numpy as np  # 导入数值计算库
 from sklearn.metrics import f1_score, precision_score, recall_score  # 从sklearn导入评估指标
-
+from uer.macro_moe.encoder import MacroMoEEncoder
 
 class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
     def __init__(self, args):  # 初始化函数
         super(Classifier, self).__init__()  # 调用父类初始化函数
         self.embedding = str2embedding[args.embedding](args, len(args.tokenizer.vocab))  # 根据参数创建嵌入层
-        self.encoder = str2encoder[args.encoder](args)  # 根据参数创建编码器
+        if args.encoder == "macro_moe":
+            self.encoder = MacroMoEEncoder(args)
+        else:
+            self.encoder = str2encoder[args.encoder](args)
         self.labels_num = args.labels_num  # 设置标签数量
         self.pooling = args.pooling  # 设置池化方式
         self.soft_targets = args.soft_targets  # 设置是否使用软目标
@@ -325,6 +328,13 @@ def main():  # 主函数
 
     # Build classification model.
     model = Classifier(args)  # 构建分类模型
+
+    # [新增] 如果是 MacroMoE 且需要小样本适配
+    if args.encoder == "macro_moe":
+        # 假设你在 args 里加了一个参数 --few_shot_stage
+        # 或者直接在这里强制开启，取决于你的实验设计
+        print("Enable Few-shot Adaptation Mode: Freezing Backbone, Training Adapters.")
+        model.encoder.set_adaptation_mode(True)
 
     # Load or initialize parameters.
     load_or_initialize_parameters(args, model)  # 加载或初始化参数

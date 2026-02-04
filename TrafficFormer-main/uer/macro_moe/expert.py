@@ -15,74 +15,64 @@ class TrafficMacroExpert(nn.Module):
         super(TrafficMacroExpert, self).__init__()
 
         # 1. 准备骨干参数
-        # 强制设置 is_moe=False，确保专家内部是标准的 Transformer 结构
-        # 避免递归调用原有的 Micro-MoE 代码
+        # 必须强制设置 is_moe=False。因为专家本身已经是 MoE 的一部分了，
+        # 我们希望专家的内部是一个标准的 Transformer，不要再递归地变成 MoE
         args_copy = copy.deepcopy(args)
         if hasattr(args_copy, 'is_moe'):
             args_copy.is_moe = False
 
-        # 2. 初始化骨干网络 (复用原有 Encoder)
+        # 2. 初始化骨干网络 (复用 UER 的 TransformerEncoder)
         self.backbone = TransformerEncoder(args_copy)
 
-        # 3. 初始化适配器
+        # 3. 初始化适配器 (参数量很小)
         adapter_size = getattr(args, "adapter_size", 64)
         dropout = getattr(args, "dropout", 0.1)
         self.adapter = FewShotAdapter(args.hidden_size, adapter_size, dropout)
 
-        # 模式标志
+        # 模式标志：默认 False (预训练/全量微调模式)
         self.adaptation_mode = False
 
     def set_adaptation_mode(self, mode=True):
         """
-        mode=False: 预训练/全量微调阶段 (训练 Backbone, 跳过 Adapter)
-        mode=True:  小样本适配阶段 (冻结 Backbone, 训练 Adapter)
+        核心控制函数：
+        mode=False: 预训练/全量微调阶段 -> 训练 Backbone, 冻结/跳过 Adapter
+        mode=True:  小样本适配阶段 -> 冻结 Backbone, 训练 Adapter
         """
         self.adaptation_mode = mode
 
         if mode:  # 小样本适配模式
-            # 冻结骨干
+            # 冻结骨干网络的所有参数，不计算梯度
             for param in self.backbone.parameters():
                 param.requires_grad = False
-            # 激活适配器
+            # 激活适配器参数
             for param in self.adapter.parameters():
                 param.requires_grad = True
-            self.backbone.eval()
-            self.adapter.train()
-        else:  # 预训练/全量微调模式
-            # 激活骨干
+
+            # 设置运行模式 (影响 Dropout 和 BatchNorm)
+            self.backbone.eval()  # 骨干设为评估模式
+            self.adapter.train()  # 适配器设为训练模式
+        else:  # 预训练模式
+            # 激活骨干参数
             for param in self.backbone.parameters():
                 param.requires_grad = True
-            # 冻结适配器 (预训练时不训练它)
+            # 冻结适配器 (预训练时通常不希望训练 adapter，或者让它恒等映射)
             for param in self.adapter.parameters():
                 param.requires_grad = False
+
             self.backbone.train()
             self.adapter.eval()
-
-    def get_backbone_grad_norm(self):
-        """
-        用于观测 Backbone 是否真的在被训练
-        返回 backbone 所有参数梯度的 L2 norm
-        """
-        total_sq_norm = 0.0
-        for p in self.backbone.parameters():
-            if p.grad is not None:
-                param_norm = p.grad.data.norm(2).item()
-                total_sq_norm += param_norm ** 2
-
-        # L2 Norm = sqrt(sum ||g_i||^2)
-        return total_sq_norm ** 0.5
 
     def forward(self, emb, seg):
         # 1. 骨干提取特征
         if self.adaptation_mode:
+            # 如果是适配模式，显式告诉 PyTorch 不需要计算 Backbone 的梯度，节省显存
             with torch.no_grad():
                 features = self.backbone(emb, seg)
         else:
             features = self.backbone(emb, seg)
 
         # 2. 适配器逻辑
-        # 仅在小样本适配模式下，或者为了保证输出维度一致性时通过 Adapter
-        # 但在预训练阶段，我们通常希望直接优化 backbone，不经过 adapter
+        # 仅在小样本适配模式下才让数据流经 Adapter
         if self.adaptation_mode:
             features = self.adapter(features)
 
