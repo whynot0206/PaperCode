@@ -4,10 +4,14 @@ import torch.nn.functional as F
 
 
 class ProtocolRouter(nn.Module):
-    def __init__(self, num_experts, hidden_size):
+    def __init__(self, num_experts, hidden_size, noise_std=0.01,
+                 balance_weight=0.2, entropy_weight=1.0, target_entropy=0.6):
         super(ProtocolRouter, self).__init__()
         self.num_experts = num_experts
-
+        self.noise_std = noise_std
+        self.balance_weight = balance_weight
+        self.entropy_weight = entropy_weight
+        self.target_entropy = target_entropy
         # 1. 门控层 (Gating Network) - 对应 Formula 5
         # 用于将输入特征映射到专家权重
         self.gate = nn.Linear(hidden_size, num_experts)
@@ -32,8 +36,10 @@ class ProtocolRouter(nn.Module):
 
         # 2. 加上微量噪声 (Standard Trick, 可选但推荐)
         # 帮助打破训练初期的平局，防止死锁。幅度不用太大。
-        if self.training:
-            router_logits = router_logits + torch.randn_like(router_logits) * 0.05
+        # if self.training:
+        #    router_logits = router_logits + torch.randn_like(router_logits) * 0.05
+        if self.training and self.noise_std > 0:
+            router_logits = router_logits + torch.randn_like(router_logits) * self.noise_std
 
         # 3. 计算路由概率 (Prob_e)
         router_probs = F.softmax(router_logits, dim=-1)  # [batch_size, num_experts]
@@ -69,7 +75,20 @@ class ProtocolRouter(nn.Module):
         # c. 计算 Loss
         # 这就是 Formula 9 的核心：点积求和 * N
         # 这种 Loss 鼓励 prob 和 fraction 向量都接近均匀分布 [1/N, ..., 1/N]
-        load_balance_loss = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
+        # load_balance_loss = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
+
+        # 说明：仅用 uniform load-balance 会过强地推向“绝对均匀”。
+        # 这里改为“均衡项 + 熵目标项”：
+        # - 均衡项：维持最基本的专家利用率，权重较低；
+        # - 熵目标项：鼓励达到一个“合适而非最大均匀”的路由熵（可配置）。
+        uniform_balance = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
+
+        norm_entropy = -(
+                fraction_per_expert * torch.log(fraction_per_expert + 1e-9)
+        ).sum() / torch.log(torch.tensor(float(self.num_experts), device=router_probs.device))
+        entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
+
+        load_balance_loss = self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
 
         # ================= 统计更新 =================
         with torch.no_grad():

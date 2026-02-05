@@ -13,7 +13,15 @@ class MacroMoEEncoder(nn.Module):
         ])
 
         # 【修复点】这里必须传入 args.hidden_size，因为 Router 里的 Linear 层需要它
-        self.router = ProtocolRouter(self.num_experts, args.hidden_size)
+        # self.router = ProtocolRouter(self.num_experts, args.hidden_size)
+        self.router = ProtocolRouter(
+            self.num_experts,
+            args.hidden_size,
+            noise_std=getattr(args, "macro_router_noise_std", 0.01),
+            balance_weight=getattr(args, "macro_router_balance_weight", 0.2),
+            entropy_weight=getattr(args, "macro_router_entropy_weight", 1.0),
+            target_entropy=getattr(args, "macro_router_target_entropy", 0.6),
+        )
 
     def set_adaptation_mode(self, mode=True):
         for expert in self.experts:

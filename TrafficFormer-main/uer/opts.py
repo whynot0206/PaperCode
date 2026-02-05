@@ -39,6 +39,14 @@ def model_opts(parser):
                         help="Hidden size of the few-shot adapter.")
     parser.add_argument("--few_shot_stage", action='store_true',
                         help="If true, freeze backbone and only train adapters.")
+    parser.add_argument("--macro_router_noise_std", type=float, default=0.01,
+                        help="Std of Gaussian noise added to Macro MoE router logits during training.")
+    parser.add_argument("--macro_router_balance_weight", type=float, default=0.2,
+                        help="Weight of uniform load-balancing term inside Macro MoE router aux loss.")
+    parser.add_argument("--macro_router_entropy_weight", type=float, default=1.0,
+                        help="Weight of entropy-target term inside Macro MoE router aux loss.")
+    parser.add_argument("--macro_router_target_entropy", type=float, default=0.6,
+                        help="Target normalized routing entropy in [0,1]. Lower means more specialization.")
 
 
 def optimization_opts(parser):
