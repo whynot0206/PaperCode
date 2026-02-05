@@ -86,7 +86,7 @@ def main():  # 主函数
                         help="moebert route method.")  # 帮助信息：MOE路由方法
     parser.add_argument("--moebert_route_hash_list", default=None, type=str,
                         help="Path of moebert hash list file.")  # 添加MOE哈希列表路径参数
-    parser.add_argument("--moebert_load_balance", type=float, default=0.02, help="gate loss weight.")  # 添加MOE负载平衡参数
+    parser.add_argument("--moebert_load_balance", type=float, default=0.01, help="gate loss weight.")  # 添加MOE负载平衡参数
 
     # Masking options.
     parser.add_argument("--whole_word_masking", action="store_true", help="Whole word masking.")  # 添加全词掩码参数
