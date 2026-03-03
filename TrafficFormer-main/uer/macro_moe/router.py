@@ -82,11 +82,14 @@ class ProtocolRouter(nn.Module):
         # 这里改为“均衡项 + 熵目标项”：
         # - 均衡项：维持最基本的专家利用率，权重较低；
         # - 熵目标项：鼓励达到一个“合适而非最大均匀”的路由熵（可配置）。
+        # 说明：仅用 uniform load-balance 会过强地推向“绝对均匀”。
         uniform_balance = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
 
+        # 【修复点】：将 fraction_per_expert 替换为 prob_per_expert，恢复梯度回传！
         norm_entropy = -(
-                fraction_per_expert * torch.log(fraction_per_expert + 1e-9)
+                prob_per_expert * torch.log(prob_per_expert + 1e-9)
         ).sum() / torch.log(torch.tensor(float(self.num_experts), device=router_probs.device))
+
         entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
 
         load_balance_loss = self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
