@@ -28,7 +28,8 @@ class ProtocolRouter(nn.Module):
         """
         # [batch_size, hidden_size]
         # 使用 [CLS] 或 mean pooling 作为路由特征
-        router_input = torch.mean(inputs_embeds[:, :32, :], dim=1)
+        # router_input = torch.mean(inputs_embeds[:, :32, :], dim=1)
+        router_input = torch.mean(inputs_embeds, dim=1)
 
         # ================= Formula 5: Routing Logic =================
         # 1. 计算 Logits
@@ -47,11 +48,11 @@ class ProtocolRouter(nn.Module):
         # 4. 选择 Top-k 专家
         # values: [batch_size, k], indices: [batch_size, k]
         # 如果是预训练，通常 k=1；论文中 Inference 用了 k=2
-        _, expert_indices = torch.topk(router_probs, k=top_k, dim=-1)
+        router_probs_values, expert_indices = torch.topk(router_probs, k=top_k, dim=-1)
 
-        # 为了兼容你现有的 Encoder 代码 (期待 [batch_size])，如果 k=1 我们 squeeze 掉最后一维
         if top_k == 1:
             expert_indices = expert_indices.squeeze(-1)
+            router_probs_values = router_probs_values.squeeze(-1)  # [batch_size]
 
         # ================= Formula 9: Load Balancing Loss =================
         # L_aux = N * sum(Load_e * Prob_e)
@@ -100,4 +101,4 @@ class ProtocolRouter(nn.Module):
                 for i in range(self.num_experts):
                     self.usage_counter[i] += (expert_indices == i).any(dim=-1).sum()
 
-        return expert_indices, load_balance_loss
+        return expert_indices, load_balance_loss, router_probs_values
