@@ -301,6 +301,28 @@ python3 pre-training/pretrain.py \
     --mask fully_visible \
     --target bertflow \
     --learning_rate 6e-5 
+    
+'''
+'''
+python3 pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --moebert_load_balance 0.1
 '''
 '''
 python3 -u pre-training/pretrain.py \
@@ -321,5 +343,30 @@ python3 -u pre-training/pretrain.py \
     --adapter_size 32 \
     --mask fully_visible \
     --target bertflow \
-    --learning_rate 6e-5 
+    --learning_rate 6e-5 \
+    --moebert_load_balance 0.1
+    expert-1的使用非常少
+'''
+'''
+python3 -u pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --moebert_load_balance 1
+    这次还是expert-1全是0
 '''
