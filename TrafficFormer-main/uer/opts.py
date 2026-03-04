@@ -35,7 +35,7 @@ def model_opts(parser):
     # [新增] Macro MoE 核心参数
     parser.add_argument("--macro_expert_num", type=int, default=4,
                         help="Number of macro experts in Macro MoE.")
-    parser.add_argument("--adapter_size", type=int, default=64,
+    parser.add_argument("--adapter_size", type=int, default=32,
                         help="Hidden size of the few-shot adapter.")
     parser.add_argument("--few_shot_stage", action='store_true',
                         help="If true, freeze backbone and only train adapters.")

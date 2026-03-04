@@ -322,7 +322,7 @@ python3 pre-training/pretrain.py \
     --mask fully_visible \
     --target bertflow \
     --learning_rate 6e-5 \
-    --moebert_load_balance 0.1
+    --moebert_load_balance 0.1 \
 '''
 '''
 python3 -u pre-training/pretrain.py \

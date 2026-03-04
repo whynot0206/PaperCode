@@ -25,7 +25,7 @@ class TrafficMacroExpert(nn.Module):
         self.backbone = TransformerEncoder(args_copy)
 
         # 3. 初始化适配器
-        adapter_size = getattr(args, "adapter_size", 64)
+        adapter_size = getattr(args, "adapter_size", 32)
         dropout = getattr(args, "dropout", 0.1)
         self.adapter = FewShotAdapter(args.hidden_size, adapter_size, dropout)
 
