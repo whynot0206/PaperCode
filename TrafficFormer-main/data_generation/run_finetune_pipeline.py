@@ -19,7 +19,7 @@ def main():
     # ==========================================
     # 配置区域
     # ==========================================
-    ROOT_DIR = "/home/xuke/why_node/TrafficFormer_node"
+    ROOT_DIR = "/home/xuke/why_code/trafficformer"
 
     # 原始数据路径
     RAW_PCAP_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN")

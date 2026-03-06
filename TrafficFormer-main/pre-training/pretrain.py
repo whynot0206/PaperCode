@@ -188,59 +188,6 @@ python3 pre-training/pretrain.py \
     --target bertflow \
     --learning_rate 1e-4
 
-#### **阶段 2：全量微调 (Full Fine-tuning)**
-在已知类别的数据集上进行有监督训练，更新所有参数（专家 + 分类头）。
-* **改动点**：
-    * 输入模型 (`--pretrained_model_path`) 使用阶段 1 训练好的 `pretrain_model_macro_moe.bin`。
-    * `--encoder` 设为 `macro_moe`。
-    * **不添加** `--few_shot_stage`（骨干参数继续参与微调）。
-
-```bash
-CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
-    --vocab_path models/encryptd_vocab.txt \
-    --train_path train_dataset.tsv \
-    --dev_path valid_dataset.tsv \
-    --test_path test_dataset.tsv \
-    --pretrained_model_path models/pretrain_model_macro_moe.bin \
-    --output_model_path models/finetuned_model_stage2.bin \
-    --epochs_num 4 \
-    --earlystop 4 \
-    --batch_size 128 \
-    --embedding word_pos_seg \
-    --encoder macro_moe \
-    --macro_expert_num 4 \
-    --adapter_size 64 \
-    --mask fully_visible \
-    --seq_length 512 \
-    --learning_rate 6e-5
-
-#### **阶段 3：小样本适配 (Few-shot Adaptation)**
-在新场景的小样本数据集上训练，**冻结**专家骨干，仅更新适配器和分类头。
-* **改动点**：
-    * 输入模型 (`--pretrained_model_path`) 使用阶段 2 训练好的 `finetuned_model_stage2.bin`。
-    * 使用新场景的数据集（例如 `few_shot_train.tsv`）。
-    * **添加** `--few_shot_stage`：这是一个开关，加上它就会触发“冻结骨干、训练适配器”的模式。
-
-```bash
-CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
-    --vocab_path models/encryptd_vocab.txt \
-    --train_path few_shot_train.tsv \
-    --dev_path few_shot_valid.tsv \
-    --test_path few_shot_test.tsv \
-    --pretrained_model_path models/finetuned_model_stage2.bin \
-    --output_model_path models/few_shot_adapted_model.bin \
-    --epochs_num 10 \
-    --batch_size 32 \
-    --embedding word_pos_seg \
-    --encoder macro_moe \
-    --macro_expert_num 4 \
-    --adapter_size 64 \
-    --mask fully_visible \
-    --seq_length 512 \
-    --learning_rate 1e-4 \
-    --few_shot_stage
-'''
-'''
 第一次参数调整
 python3 pre-training/pretrain.py \
     --dataset_path data_generation/data/pretrain_dataset.pt \
@@ -322,7 +269,7 @@ python3 pre-training/pretrain.py \
     --mask fully_visible \
     --target bertflow \
     --learning_rate 6e-5 \
-    --moebert_load_balance 0.1 \
+    --moebert_load_balance 0.1 
 '''
 '''
 python3 -u pre-training/pretrain.py \
@@ -369,4 +316,259 @@ python3 -u pre-training/pretrain.py \
     --learning_rate 6e-5 \
     --moebert_load_balance 1
     这次还是expert-1全是0
+'''
+'''
+python3 -u pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_8e.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.2 \
+    --moebert_load_balance 0.2 
+用8个专家试一下batch_size = 8 ，这个参数的效果还不错，8个专家都能被分配到嵌入，但是acc很差，所以要再调一下
+'''
+'''
+python3 -u pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_4e_optimized.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.05 \
+    --moebert_load_balance 0.1 \
+    --macro_router_target_entropy 0.85
+这是3.4晚上跑的4专家，为了提高acc
+'''
+'''
+python3 -u pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_8e_optimized.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.05 \
+    --moebert_load_balance 0.1 \
+    --macro_router_target_entropy 0.88
+再次跑8专家测试
+'''
+'''
+python3 -u pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_8e_optimized.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 16 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.05 \
+    --moebert_load_balance 0.1 \
+    --macro_router_target_entropy 0.88
+这次直接batch_size 16*4试试
+'''
+'''
+#### **阶段 2：全量微调 (Full Fine-tuning)**
+在已知类别的数据集上进行有监督训练，更新所有参数（专家 + 分类头）。
+* **改动点**：
+    * 输入模型 (`--pretrained_model_path`) 使用阶段 1 训练好的 `pretrain_model_macro_moe.bin`。
+    * `--encoder` 设为 `macro_moe`。
+    * **不添加** `--few_shot_stage`（骨干参数继续参与微调）。
+
+```bash
+CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path train_dataset.tsv \
+    --dev_path valid_dataset.tsv \
+    --test_path test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe.bin \
+    --output_model_path models/finetuned_model_stage2.bin \
+    --epochs_num 4 \
+    --earlystop 4 \
+    --batch_size 128 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 6e-5
+
+修改第一次：
+CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path train_dataset.tsv \
+    --dev_path valid_dataset.tsv \
+    --test_path test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe.bin \
+    --output_model_path models/finetuned_model_stage2.bin \
+    --epochs_num 4 \
+    --earlystop 4 \
+    --batch_size 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 6e-5 \
+    --moebert_load_balance 0.01
+
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_8e.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 20 \
+    --earlystop 4 \
+    --batch_size 64 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 1e-4 \
+    --few_shot_stage \
+    --macro_router_noise_std 0.0
+
+第二次修改
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_8e_full.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 15 \
+    --earlystop 5 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 3e-5 \
+    --pooling mean \
+    --macro_router_noise_std 0.0
+
+CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_8e_full.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 15 \
+    --earlystop 5 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 3e-5 \
+    --pooling first \
+    --macro_router_noise_std 0.0
+
+第三次微调CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_8e_full.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 5 \
+    --earlystop 4 \
+    --batch_size 128 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.0
+#### **阶段 3：小样本适配 (Few-shot Adaptation)**
+在新场景的小样本数据集上训练，**冻结**专家骨干，仅更新适配器和分类头。
+* **改动点**：
+    * 输入模型 (`--pretrained_model_path`) 使用阶段 2 训练好的 `finetuned_model_stage2.bin`。
+    * 使用新场景的数据集（例如 `few_shot_train.tsv`）。
+    * **添加** `--few_shot_stage`：这是一个开关，加上它就会触发“冻结骨干、训练适配器”的模式。
+
+```bash
+CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path few_shot_train.tsv \
+    --dev_path few_shot_valid.tsv \
+    --test_path few_shot_test.tsv \
+    --pretrained_model_path models/finetuned_model_stage2.bin \
+    --output_model_path models/few_shot_adapted_model.bin \
+    --epochs_num 10 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --mask fully_visible \
+    --seq_length 512 \
+    --learning_rate 1e-4 \
+    --few_shot_stage
 '''

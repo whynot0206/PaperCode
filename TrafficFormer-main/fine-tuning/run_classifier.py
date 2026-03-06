@@ -49,8 +49,14 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         # Embedding.
         emb = self.embedding(src, seg)  # 通过嵌入层获取嵌入表示
         # Encoder.
-        output = self.encoder(emb, seg)  # 通过编码器获取编码输出
+        if hasattr(self, "encoder") and type(self.encoder).__name__ == "MacroMoEEncoder":
+            output, gate_loss = self.encoder(emb, seg)
+        else:
+            output = self.encoder(emb, seg)
+            gate_loss = 0.0
+
         temp_output = output  # 保存临时输出（用于调试或其他用途）
+        # Target.
         # Target.
         if self.pooling == "mean":  # 如果使用均值池化
             output = torch.mean(output, dim=1)  # 沿序列维度取均值
@@ -69,6 +75,14 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
                                                             tgt.view(-1))  # 计算混合损失（MSE + NLL）
             else:  # 如果不使用软目标
                 loss = nn.NLLLoss()(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
+
+            # [关键修复]：如果是 MoE 模型，加上 gate_loss 的惩罚项
+            if hasattr(self, "encoder") and type(self.encoder).__name__ == "MacroMoEEncoder" and isinstance(gate_loss,
+                                                                                                            torch.Tensor):
+                # 如果你在运行命令中传入了 --moebert_load_balance，可以从一个全局或传参里拿，这里暂时用默认权重0.1
+                # 为了稳妥，可以直接用 0.1 作为负载均衡权重
+                loss = loss + 0.1 * gate_loss
+
             return loss, logits  # 返回损失和logits
         else:  # 如果没有目标标签（预测模式）
             return None, logits  # 返回None和logits
