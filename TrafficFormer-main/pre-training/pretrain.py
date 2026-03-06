@@ -546,6 +546,69 @@ CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
     --seq_length 320 \
     --learning_rate 6e-5 \
     --macro_router_noise_std 0.0
+    
+    第五次
+    python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_full.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 15 \
+    --earlystop 5 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --learning_rate 3e-5 \
+    --macro_router_noise_std 0.0
+    
+    这一次能到40%
+    python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_enhance5_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_full_enhanced.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 10 \
+    --earlystop 4 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --learning_rate 5e-5 \
+    --macro_router_noise_std 0.0
+    
+    python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_enhance5_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_8e_optimized.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_final.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 8 \
+    --earlystop 3 \
+    --batch_size 32 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 8 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --learning_rate 2e-5 \
+    --macro_router_noise_std 0.05
+    
 #### **阶段 3：小样本适配 (Few-shot Adaptation)**
 在新场景的小样本数据集上训练，**冻结**专家骨干，仅更新适配器和分类头。
 * **改动点**：

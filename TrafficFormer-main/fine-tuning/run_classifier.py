@@ -343,12 +343,15 @@ def main():  # 主函数
     # Build classification model.
     model = Classifier(args)  # 构建分类模型
 
-    # [新增] 如果是 MacroMoE 且需要小样本适配
+    # 动态判断是否开启 Few-shot 适配模式
     if args.encoder == "macro_moe":
-        # 假设你在 args 里加了一个参数 --few_shot_stage
-        # 或者直接在这里强制开启，取决于你的实验设计
-        print("Enable Few-shot Adaptation Mode: Freezing Backbone, Training Adapters.")
-        model.encoder.set_adaptation_mode(True)
+        # 如果命令里传了 --few_shot_stage
+        if hasattr(args, "few_shot_stage") and args.few_shot_stage:
+            print("Enable Few-shot Adaptation Mode: Freezing Backbone, Training Adapters.")
+            model.encoder.set_adaptation_mode(True)
+        else:
+            print("Enable Full Fine-tuning Mode: Unfreezing Backbone.")
+            model.encoder.set_adaptation_mode(False)
 
     # Load or initialize parameters.
     load_or_initialize_parameters(args, model)  # 加载或初始化参数
