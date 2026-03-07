@@ -50,10 +50,12 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         emb = self.embedding(src, seg)  # 通过嵌入层获取嵌入表示
         # Encoder.
         if hasattr(self, "encoder") and type(self.encoder).__name__ == "MacroMoEEncoder":
-            output, gate_loss = self.encoder(emb, seg)
+            # 接收多出来的 expert_indices
+            output, gate_loss, expert_indices = self.encoder(emb, seg)
         else:
             output = self.encoder(emb, seg)
             gate_loss = 0.0
+            expert_indices = None  # 如果不是 MoE，就返回 None
 
         temp_output = output  # 保存临时输出（用于调试或其他用途）
         # Target.
@@ -83,9 +85,9 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
                 # 为了稳妥，可以直接用 0.1 作为负载均衡权重
                 loss = loss + 0.1 * gate_loss
 
-            return loss, logits  # 返回损失和logits
+            return loss, logits, expert_indices# 返回损失和logits
         else:  # 如果没有目标标签（预测模式）
-            return None, logits  # 返回None和logits
+            return None, logits, expert_indices# 返回None和logits
             # return temp_output, logits  # 注释掉的代码：返回临时输出和logits
 
 
@@ -239,6 +241,7 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
     # Confusion matrix.
     confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)  # 初始化混淆矩阵
     y_true, y_pred = [], []  # 初始化真实标签和预测标签列表
+    all_expert_indices = []  # <--- 新增：用于收集所有的专家分配结果
     args.model.eval()  # 设置模型为评估模式
 
     for i, (src_batch, tgt_batch, seg_batch, _) in enumerate(batch_loader(batch_size, src, tgt, seg)):  # 遍历批次数据
@@ -247,13 +250,18 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
         tgt_batch = tgt_batch.to(args.device)  # 将目标数据批次移动到设备
         seg_batch = seg_batch.to(args.device)  # 将分段标识批次移动到设备
         with torch.no_grad():  # 禁用梯度计算
-            _, logits = args.model(src_batch, tgt_batch, seg_batch)  # 前向传播获取logits
+            _, logits, expert_indices= args.model(src_batch, tgt_batch, seg_batch)  # 前向传播获取logits
         pred = torch.argmax(nn.Softmax(dim=1)(logits), dim=1)  # 获取预测结果（取最大概率的类别）
         gold = tgt_batch  # 获取真实标签
         for j in range(pred.size()[0]):  # 遍历批次中的每个样本
             confusion[pred[j], gold[j]] += 1  # 更新混淆矩阵
             y_true.append(gold[j].cpu())  # 添加真实标签到列表
             y_pred.append(pred[j].cpu())  # 添加预测标签到列表
+
+            # 新增：把这个样本的路由结果存下来
+            if expert_indices is not None:
+                all_expert_indices.append(expert_indices[j].cpu().item())
+
         correct += torch.sum(pred == gold).item()  # 更新正确预测计数
 
     if print_confusion_matrix:  # 如果需要打印混淆矩阵
@@ -273,6 +281,16 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
             else:  # 如果精确率和召回率不都为0
                 f1 = 2 * p * r / (p + r)  # 计算F1分数
             print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i, p, r, f1))  # 打印每个类别的评估指标
+
+        if len(all_expert_indices) > 0:
+            import json
+            routing_data = {
+                "true_labels": [int(y) for y in y_true],
+                "expert_indices": all_expert_indices
+            }
+            with open("routing_analysis.json", "w") as f:
+                json.write(json.dumps(routing_data))
+            print("路由数据已保存：routing_analysis.json!")
 
     print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct / len(dataset), correct, len(dataset)))  # 打印准确率
     print("Macro precision: {:.4f}, Micro precision: {:.4f}, Weighted precision: {:.4f}".format(

@@ -66,4 +66,4 @@ class MacroMoEEncoder(nn.Module):
         final_output = final_output_sorted[reverse_indices]
 
         # 3. 返回 output 和 gate_loss
-        return final_output, gate_loss
+        return final_output, gate_loss, expert_indices

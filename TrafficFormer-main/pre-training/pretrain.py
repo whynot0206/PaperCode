@@ -939,8 +939,46 @@ python3 fine-tuning/run_classifier.py \
     --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
     --config_path models/bert/base_config.json \
     --output_model_path models/finetuned_full_macro_moe_7.bin \
-    --epochs 5 \
-    --batch_size 32 \
+    --epochs 20 \
+    --batch_size 64 \
+    --seq_length 320 \
+    --learning_rate 2e-5 \
+    --encoder macro_moe \
+    --embedding word_pos_seg \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --macro_router_noise_std 0.0 \
+    --macro_router_target_entropy 0.3
+Test set evaluation.
+Confusion matrix:
+tensor([[35,  1,  0,  0,  1,  1],
+        [ 2, 11,  0,  0,  0,  0],
+        [ 0,  0, 31,  0,  0,  0],
+        [ 0,  1,  0, 14,  0,  0],
+        [ 0,  2,  1,  0, 16,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.921, 0.946, 0.933
+Label 1: 0.846, 0.733, 0.786
+Label 2: 1.000, 0.969, 0.984
+Label 3: 0.933, 1.000, 0.966
+Label 4: 0.842, 0.941, 0.889
+Label 5: 1.000, 0.833, 0.909
+Acc. (Correct/Total): 0.9256 (112/121) 
+Macro precision: 0.9238, Micro precision: 0.9256, Weighted precision: 0.9269
+Macro recall: 0.9038, Micro recall: 0.9256, Weighted recall: 0.9256
+Macro f1: 0.9111, Micro f1: 0.9256, Weighted f1: 0.9247
+
+python3 fine-tuning/run_classifier.py \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_ad64.bin-90000 \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --config_path models/bert/base_config.json \
+    --output_model_path models/finetuned_full_macro_moe_8.bin \
+    --epochs 20 \
+    --batch_size 64 \
     --seq_length 320 \
     --learning_rate 3e-5 \
     --encoder macro_moe \
@@ -949,6 +987,65 @@ python3 fine-tuning/run_classifier.py \
     --adapter_size 64 \
     --macro_router_noise_std 0.0 \
     --macro_router_target_entropy 0.3
+    
+Test set evaluation.
+Confusion matrix:
+tensor([[34,  1,  1,  0,  1,  0],
+        [ 1, 12,  3,  0,  0,  0],
+        [ 1,  0, 27,  0,  0,  1],
+        [ 0,  1,  0, 14,  0,  0],
+        [ 1,  1,  1,  0, 16,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.919, 0.919, 0.919
+Label 1: 0.750, 0.800, 0.774
+Label 2: 0.931, 0.844, 0.885
+Label 3: 0.933, 1.000, 0.966
+Label 4: 0.842, 0.941, 0.889
+Label 5: 1.000, 0.833, 0.909
+Acc. (Correct/Total): 0.8926 (108/121) 
+Macro precision: 0.8959, Micro precision: 0.8926, Weighted precision: 0.8961
+Macro recall: 0.8895, Micro recall: 0.8926, Weighted recall: 0.8926
+Macro f1: 0.8903, Micro f1: 0.8926, Weighted f1: 0.8928
+
+python3 fine-tuning/run_classifier.py \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_ad64.bin-90000 \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --config_path models/bert/base_config.json \
+    --output_model_path models/finetuned_full_macro_moe_7.bin \
+    --epochs 25 \
+    --batch_size 64 \
+    --seq_length 320 \
+    --learning_rate 3e-5 \
+    --encoder macro_moe \
+    --embedding word_pos_seg \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --macro_router_noise_std 0.0 \
+    --macro_router_target_entropy 0.3
+    
+Test set evaluation.
+Confusion matrix:
+tensor([[34,  1,  1,  0,  1,  0],
+        [ 2, 12,  0,  0,  1,  0],
+        [ 1,  0, 31,  0,  2,  1],
+        [ 0,  1,  0, 14,  0,  0],
+        [ 0,  1,  0,  0, 13,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.919, 0.919, 0.919
+Label 1: 0.800, 0.800, 0.800
+Label 2: 0.886, 0.969, 0.925
+Label 3: 0.933, 1.000, 0.966
+Label 4: 0.929, 0.765, 0.839
+Label 5: 1.000, 0.833, 0.909
+Acc. (Correct/Total): 0.9008 (109/121) 
+Macro precision: 0.9111, Micro precision: 0.9008, Weighted precision: 0.9024
+Macro recall: 0.8810, Micro recall: 0.9008, Weighted recall: 0.9008
+Macro f1: 0.8929, Micro f1: 0.9008, Weighted f1: 0.8995
 
 #### **阶段 3：小样本适配 (Few-shot Adaptation)**
 在新场景的小样本数据集上训练，**冻结**专家骨干，仅更新适配器和分类头。
