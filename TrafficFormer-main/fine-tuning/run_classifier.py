@@ -24,6 +24,7 @@ import numpy as np  # 导入数值计算库
 from sklearn.metrics import f1_score, precision_score, recall_score  # 从sklearn导入评估指标
 from uer.macro_moe.encoder import MacroMoEEncoder
 
+
 class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
     def __init__(self, args):  # 初始化函数
         super(Classifier, self).__init__()  # 调用父类初始化函数
@@ -36,6 +37,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         self.pooling = args.pooling  # 设置池化方式
         self.soft_targets = args.soft_targets  # 设置是否使用软目标
         self.soft_alpha = args.soft_alpha  # 设置软目标权重
+        self.moebert_load_balance = getattr(args, "moebert_load_balance", 0.1)  # MoE gate loss 系数（支持命令行覆盖）
         self.output_layer_1 = nn.Linear(args.hidden_size, args.hidden_size)  # 创建第一个输出层
         self.output_layer_2 = nn.Linear(args.hidden_size, self.labels_num)  # 创建第二个输出层（分类层）
 
@@ -78,16 +80,12 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
             else:  # 如果不使用软目标
                 loss = nn.NLLLoss()(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
 
-            # [关键修复]：如果是 MoE 模型，加上 gate_loss 的惩罚项
-            if hasattr(self, "encoder") and type(self.encoder).__name__ == "MacroMoEEncoder" and isinstance(gate_loss,
-                                                                                                            torch.Tensor):
-                # 如果你在运行命令中传入了 --moebert_load_balance，可以从一个全局或传参里拿，这里暂时用默认权重0.1
-                # 为了稳妥，可以直接用 0.1 作为负载均衡权重
-                loss = loss + 0.1 * gate_loss
+            if isinstance(self.encoder, MacroMoEEncoder) and isinstance(gate_loss, torch.Tensor):
+                loss = loss + self.moebert_load_balance * gate_loss
 
-            return loss, logits, expert_indices# 返回损失和logits
+            return loss, logits, expert_indices  # 返回损失和logits
         else:  # 如果没有目标标签（预测模式）
-            return None, logits, expert_indices# 返回None和logits
+            return None, logits, expert_indices  # 返回None和logits
             # return temp_output, logits  # 注释掉的代码：返回临时输出和logits
 
 
@@ -214,7 +212,7 @@ def train_model(args, model, optimizer, scheduler, src_batch, tgt_batch, seg_bat
     if soft_tgt_batch is not None:  # 如果有软目标批次
         soft_tgt_batch = soft_tgt_batch.to(args.device)  # 将软目标移动到设备
 
-    loss, _ = model(src_batch, tgt_batch, seg_batch, soft_tgt_batch)  # 前向传播计算损失
+    loss, _, _ = model(src_batch, tgt_batch, seg_batch, soft_tgt_batch)  # 前向传播计算损失
     if torch.cuda.device_count() > 1:  # 如果使用多个GPU
         loss = torch.mean(loss)  # 对损失求均值（多GPU情况）
 
@@ -250,7 +248,7 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
         tgt_batch = tgt_batch.to(args.device)  # 将目标数据批次移动到设备
         seg_batch = seg_batch.to(args.device)  # 将分段标识批次移动到设备
         with torch.no_grad():  # 禁用梯度计算
-            _, logits, expert_indices= args.model(src_batch, tgt_batch, seg_batch)  # 前向传播获取logits
+            _, logits, expert_indices = args.model(src_batch, tgt_batch, seg_batch)  # 前向传播获取logits
         pred = torch.argmax(nn.Softmax(dim=1)(logits), dim=1)  # 获取预测结果（取最大概率的类别）
         gold = tgt_batch  # 获取真实标签
         for j in range(pred.size()[0]):  # 遍历批次中的每个样本
@@ -289,7 +287,7 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
                 "expert_indices": all_expert_indices
             }
             with open("routing_analysis.json", "w") as f:
-                json.write(json.dumps(routing_data))
+                json.dump(routing_data, f)  # <--- 直接把数据 dump 给文件对象 f
             print("路由数据已保存：routing_analysis.json!")
 
     print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct / len(dataset), correct, len(dataset)))  # 打印准确率

@@ -1047,6 +1047,69 @@ Macro precision: 0.9111, Micro precision: 0.9008, Weighted precision: 0.9024
 Macro recall: 0.8810, Micro recall: 0.9008, Weighted recall: 0.9008
 Macro f1: 0.8929, Micro f1: 0.9008, Weighted f1: 0.8995
 
+出现问题，全都给expert1进行处理了，现在调一下moe的参数
+python3 fine-tuning/run_classifier.py \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_ad64.bin-90000 \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --config_path models/bert/base_config.json \
+    --output_model_path models/finetuned_full_macro_moe_9.bin \
+    --epochs 20 \
+    --batch_size 64 \
+    --seq_length 320 \
+    --learning_rate 2e-5 \
+    --encoder macro_moe \
+    --embedding word_pos_seg \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --macro_router_noise_std 0.05 \
+    --moebert_load_balance 0.1 \
+    --macro_router_target_entropy 0.88 
+
+Test set evaluation.
+Confusion matrix:
+tensor([[34,  0,  0,  0,  1,  0],
+        [ 1, 13,  0,  0,  0,  0],
+        [ 1,  0, 30,  0,  1,  1],
+        [ 0,  1,  0, 14,  0,  0],
+        [ 1,  1,  2,  0, 15,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.971, 0.919, 0.944
+Label 1: 0.929, 0.867, 0.897
+Label 2: 0.909, 0.937, 0.923
+Label 3: 0.933, 1.000, 0.966
+Label 4: 0.789, 0.882, 0.833
+Label 5: 1.000, 0.833, 0.909
+路由数据已保存：routing_analysis.json!
+Acc. (Correct/Total): 0.9174 (111/121)
+Macro precision: 0.9220, Micro precision: 0.9174, Weighted precision: 0.9211
+Macro recall: 0.9065, Micro recall: 0.9174, Weighted recall: 0.9174
+Macro f1: 0.9120, Micro f1: 0.9174, Weighted f1: 0.9179
+
+专家还是不行，全都给expert1了，所以再次调整参数：
+python3 fine-tuning/run_classifier.py \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_ad64.bin-90000 \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --config_path models/bert/base_config.json \
+    --output_model_path models/finetuned_full_macro_moe_10.bin \
+    --epochs 20 \
+    --batch_size 32 \
+    --seq_length 320 \
+    --learning_rate 3e-5 \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --macro_router_noise_std 0.2 \
+    --moebert_load_balance 2.0 \
+    --macro_router_target_entropy 1.0
+    
+    
 #### **阶段 3：小样本适配 (Few-shot Adaptation)**
 在新场景的小样本数据集上训练，**冻结**专家骨干，仅更新适配器和分类头。
 * **改动点**：
@@ -1072,4 +1135,26 @@ CUDA_VISIBLE_DEVICES=2 python3 fine-tuning/run_classifier.py \
     --seq_length 512 \
     --learning_rate 1e-4 \
     --few_shot_stage
+'''
+'''
+
+python3 fine-tuning/run_classifier.py \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_ad64.bin-90000 \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --config_path models/bert/base_config.json \
+    --output_model_path models/finetuned_full_macro_moe_test.bin \
+    --epochs 20 \
+    --batch_size 64 \
+    --seq_length 320 \
+    --learning_rate 2e-5 \
+    --encoder macro_moe \
+    --embedding word_pos_seg \
+    --macro_expert_num 4 \
+    --adapter_size 64 \
+    --macro_router_noise_std 0.0 \
+    --macro_router_target_entropy 0.3 \
+    --moebert_load_balance 0.1
 '''
