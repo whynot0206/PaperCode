@@ -29,7 +29,33 @@ class ProtocolRouter(nn.Module):
         # [batch_size, hidden_size]
         # 使用 [CLS] 或 mean pooling 作为路由特征
         # router_input = torch.mean(inputs_embeds[:, :32, :], dim=1)
-        router_input = torch.mean(inputs_embeds, dim=1)
+        # router_input = torch.mean(inputs_embeds, dim=1)
+        # router_input = inputs_embeds[:, 0, :]
+        # inputs_embeds 的形状通常是 [batch_size, seq_length, hidden_size]
+
+        # 1. 动态生成 Mask（假设你的词表中 [PAD] 的 ID 对应的 embedding 通常是零向量，
+        # 或者你可以根据 inputs_embeds 在 hidden_size 维度上的绝对值和来判断是否为 Padding）
+        # 这里提供一种通用的特征级 Mask 估算方法（如果传入了真正的 src mask 最好）：
+        # 计算每个 token 向量的 L2 范数，如果不为 0，则认为是有效 token
+        token_norms = torch.norm(inputs_embeds, dim=-1)
+        # mask 的形状为 [batch_size, seq_length]，有效位置为 1，Padding 位置为 0
+        mask = (token_norms > 1e-5).float()
+
+        # 2. 将 Mask 扩展到与 inputs_embeds 相同的维度 [batch_size, seq_length, hidden_size]
+        mask_expanded = mask.unsqueeze(-1)
+
+        # 3. 把 Padding 位置的特征强行清零
+        masked_embeds = inputs_embeds * mask_expanded
+
+        # 4. 对有效特征求和 [batch_size, hidden_size]
+        sum_embeds = torch.sum(masked_embeds, dim=1)
+
+        # 5. 计算每个样本真实的有效长度 [batch_size, 1]
+        # 使用 clamp(min=1e-9) 防止除以 0 的崩溃
+        valid_lengths = torch.sum(mask, dim=1, keepdim=True).clamp(min=1e-9)
+
+        # 6. 计算真正的、纯净的均值特征！
+        router_input = sum_embeds / valid_lengths
 
         # ================= Formula 5: Routing Logic =================
         # 1. 计算 Logits

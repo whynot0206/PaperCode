@@ -226,3 +226,49 @@ python3 fine-tuning/run_classifier.py \
     --seq_length 320 \
     --learning_rate 2e-5
 '''
+'''
+--- [Step 2] 正在提取特征生成 dataset.json ---
+检测到 12 个类别: ['audio', 'chat', 'file', 'mail', 'streaming', 'voip', 'vpn-audio', 'vpn-chat', 'vpn-file', 'vpn-mail', 'vpn-streaming', 'vpn-voip']
+label number:  12
+audio 0
+chat 1
+file 2
+mail 3
+streaming 4
+voip 5
+vpn-audio 6
+vpn-chat 7
+vpn-file 8
+vpn-mail 9
+vpn-streaming 10
+vpn-voip 11
+
+'''
+'''
+调整数据集，只包含VPN数据集
+检测到 6 个类别: ['vpn-audio', 'vpn-chat', 'vpn-file', 'vpn-mail', 'vpn-streaming', 'vpn-voip']
+label number:  6
+vpn-audio 0
+vpn-chat 1
+vpn-file 2
+vpn-mail 3
+vpn-streaming 4
+vpn-voip 5
+
+
+--- [Step 3] 正在生成 TSV 数据集 ---
+read dataset from json file.
+category flow
+0       368
+1       146
+2       321
+3       138
+4       166
+5       65
+all     1204
+label number of train: 6, val: 6, test: 6.
+finish generating pre-train's datagram dataset.
+Please check in /home/xuke/why_code/trafficformer/ISCX-VPN_dataset/dataset
+Step 3 完成。
+
+'''

@@ -51,12 +51,11 @@ class MacroMoEEncoder(nn.Module):
             if count > 0:
                 sub_out = self.experts[i](emb_split[i], seg_split[i])  # [sub_batch, seq_len, hidden]
 
-                # === 关键修复：乘法技巧 ===
                 # 获取当前这组数据的路由概率，并调整维度以便广播相乘
                 # probs_part: [sub_batch] -> [sub_batch, 1, 1]
                 scale = probs_split[i].view(-1, 1, 1)
 
-                # 将概率乘到输出上，打通梯度流！
+                # 将概率乘到输出上，打通梯度流.
                 sub_out = sub_out * scale
 
                 outputs_list.append(sub_out)
