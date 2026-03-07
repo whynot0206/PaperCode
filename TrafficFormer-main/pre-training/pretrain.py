@@ -1156,5 +1156,5 @@ python3 fine-tuning/run_classifier.py \
     --adapter_size 64 \
     --macro_router_noise_std 0.0 \
     --macro_router_target_entropy 0.3 \
-    --moebert_load_balance 0.1
+    ---macro_load_balance 2.0 
 '''

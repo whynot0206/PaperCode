@@ -37,7 +37,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         self.pooling = args.pooling  # 设置池化方式
         self.soft_targets = args.soft_targets  # 设置是否使用软目标
         self.soft_alpha = args.soft_alpha  # 设置软目标权重
-        self.moebert_load_balance = getattr(args, "moebert_load_balance", 0.1)  # MoE gate loss 系数（支持命令行覆盖）
+        self.macro_load_balance = getattr(args, "macro_load_balance", 0.1)
         self.output_layer_1 = nn.Linear(args.hidden_size, args.hidden_size)  # 创建第一个输出层
         self.output_layer_2 = nn.Linear(args.hidden_size, self.labels_num)  # 创建第二个输出层（分类层）
 
@@ -81,7 +81,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
                 loss = nn.NLLLoss()(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
 
             if isinstance(self.encoder, MacroMoEEncoder) and isinstance(gate_loss, torch.Tensor):
-                loss = loss + self.moebert_load_balance * gate_loss
+                loss = loss + self.macro_load_balance * gate_loss
 
             return loss, logits, expert_indices  # 返回损失和logits
         else:  # 如果没有目标标签（预测模式）
@@ -338,7 +338,7 @@ def main():  # 主函数
                         help="moebert route method.")  # 添加MOE路由方法参数
     parser.add_argument("--moebert_route_hash_list", default=None, type=str,
                         help="Path of moebert hash list file.")  # 添加MOE哈希列表路径参数
-    parser.add_argument("--moebert_load_balance", type=float, default=0.0, help="gate loss weight.")  # 添加MOE负载平衡参数
+    parser.add_argument("--moebert_load_balance", type=float, default=0.1, help="gate loss weight.")  # 添加MOE负载平衡参数
 
     args = parser.parse_args()  # 解析参数
 

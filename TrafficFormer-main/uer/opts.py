@@ -47,7 +47,8 @@ def model_opts(parser):
                         help="Weight of entropy-target term inside Macro MoE router aux loss.")
     parser.add_argument("--macro_router_target_entropy", type=float, default=0.6,
                         help="Target normalized routing entropy in [0,1]. Lower means more specialization.")
-
+    parser.add_argument("--macro_load_balance", type=float, default=0.1,
+                        help="Global weight of the gate loss in total loss (replacing moebert_load_balance).")
 
 def optimization_opts(parser):
     parser.add_argument("--learning_rate", type=float, default=2e-5,
