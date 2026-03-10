@@ -229,7 +229,7 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         self.total_correct_mlm = 0.0  # 初始化MLM任务总正确预测数
         self.total_denominator = 0.0  # 初始化MLM任务总分母数
         self.total_gate_loss = 0.0
-        self.load_balance_alpha = args.moebert_load_balance  # 设置MoE负载均衡系数
+        self.load_balance_alpha = getattr(args, "macro_load_balance", 0.1)
         self.is_moe = getattr(args, "is_moe", False)  # 确保 is_moe 属性存在
         self.is_macro_moe = (args.encoder == "macro_moe")  # 添加 macro_moe 标志
 
