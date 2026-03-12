@@ -29,17 +29,17 @@ class TrafficMacroExpert(nn.Module):
         dropout = getattr(args, "dropout", 0.1)
         self.adapter = FewShotAdapter(args.hidden_size, adapter_size, dropout)
 
-        # 模式标志
+        # 模式标志 (默认为 False，即预训练/全量微调模式)
         self.adaptation_mode = False
 
     def set_adaptation_mode(self, mode=True):
         """
-        mode=False: 预训练/全量微调阶段 (训练 Backbone, 跳过 Adapter)
-        mode=True:  小样本适配阶段 (冻结 Backbone, 训练 Adapter)
+        mode=False: 预训练/全量微调阶段 (Backbone 和 Adapter 双启用，联合训练)
+        mode=True:  小样本适配阶段 (冻结 Backbone，仅训练 Adapter)
         """
         self.adaptation_mode = mode
 
-        if mode:  # 小样本适配模式
+        if mode:  # 小样本适配模式 (Few-Shot)
             # 冻结骨干
             for param in self.backbone.parameters():
                 param.requires_grad = False
@@ -48,15 +48,16 @@ class TrafficMacroExpert(nn.Module):
                 param.requires_grad = True
             self.backbone.eval()
             self.adapter.train()
-        else:  # 预训练/全量微调模式
-            # 激活骨干
+
+        else:  # 预训练/全量微调模式 (Pretrain / Full Fine-tuning)
+            # 【修改点】激活骨干
             for param in self.backbone.parameters():
                 param.requires_grad = True
-            # 冻结适配器 (预训练时不训练它)
+            # 【修改点】激活适配器 (预训练时必须训练它，防止冷启动)
             for param in self.adapter.parameters():
-                param.requires_grad = False
+                param.requires_grad = True
             self.backbone.train()
-            self.adapter.eval()
+            self.adapter.train()
 
     def get_backbone_grad_norm(self):
         """
@@ -75,15 +76,16 @@ class TrafficMacroExpert(nn.Module):
     def forward(self, emb, seg):
         # 1. 骨干提取特征
         if self.adaptation_mode:
+            # 小样本模式：骨干网络不计算梯度，节省显存并防止破坏已学到的通用特征
             with torch.no_grad():
                 features = self.backbone(emb, seg)
         else:
+            # 预训练/全量微调模式：骨干网络正常计算梯度
             features = self.backbone(emb, seg)
 
         # 2. 适配器逻辑
-        # 仅在小样本适配模式下，或者为了保证输出维度一致性时通过 Adapter
-        # 但在预训练阶段，我们通常希望直接优化 backbone，不经过 adapter
-        if self.adaptation_mode:
-            features = self.adapter(features)
+        # 【修改点】无论是预训练还是小样本适配，特征都必须经过 Adapter！
+        # 这样在 mode=False 时，Adapter 才能和 Backbone 一起被训练，获得处理流量特征的能力。
+        features = self.adapter(features)
 
         return features

@@ -470,7 +470,7 @@ python3 -u pre-training/pretrain.py \
     --report_steps 100 \
     --save_checkpoint_steps 10000 \
     --batch_size 16 \
-    --accumulation_steps 2 \
+    --accumulation_steps 4 \
     --embedding word_pos_seg \
     --encoder macro_moe \
     --macro_expert_num 4 \
@@ -481,6 +481,32 @@ python3 -u pre-training/pretrain.py \
     --macro_router_noise_std 0.1 \
     --macro_router_target_entropy 0.88 \
     --macro_load_balance 0.2
+'''
+'''
+之前adapter在step1中并未参与训练，所以这次重新修改后再试试
+python3 pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_4e_adapter+backone.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 16 \
+    --accumulation_steps 4 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.02 \
+    --macro_router_target_entropy 0.88 \
+    --macro_load_balance 0.1 \
+    --warmup 0.1
 '''
 '''
 #### **阶段 2：全量微调 (Full Fine-tuning)**
