@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from uer.macro_moe.expert import TrafficMacroExpert
+from torch.utils.checkpoint import checkpoint
 from uer.macro_moe.router import ProtocolRouter
 
 class MacroMoEEncoder(nn.Module):
@@ -27,6 +28,16 @@ class MacroMoEEncoder(nn.Module):
     def set_adaptation_mode(self, mode=True):
         for expert in self.experts:
             expert.set_adaptation_mode(mode)
+
+    def _run_expert(self, expert_id, emb_part, seg_part):
+        """
+        显存优化：可选对 expert 前向使用 gradient checkpointing。
+        仅在训练阶段开启，以降低 activation memory。
+        """
+        expert = self.experts[expert_id]
+        if self.checkpoint_experts and self.training:
+            return checkpoint(expert, emb_part, seg_part)
+        return expert(emb_part, seg_part)
 
     def forward(self, emb, seg, input_ids=None, proto=None):
         batch_size, seq_len, hidden_size = emb.size()

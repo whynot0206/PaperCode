@@ -51,6 +51,8 @@ def model_opts(parser):
                         help="Global weight of the gate loss in total loss (replacing moebert_load_balance).")
     parser.add_argument("--macro_top_k", type=int, default=1,
                         help="Top-k experts selected by Macro MoE router. Use 2 to reduce expert collapse.")
+    parser.add_argument("--macro_checkpoint_experts", action='store_true',
+                        help="Enable gradient checkpointing on Macro-MoE experts to reduce GPU memory usage.")
 
 def optimization_opts(parser):
     parser.add_argument("--learning_rate", type=float, default=2e-5,
