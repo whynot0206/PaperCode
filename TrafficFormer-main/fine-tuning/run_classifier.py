@@ -258,7 +258,11 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
 
             # 新增：把这个样本的路由结果存下来
             if expert_indices is not None:
-                all_expert_indices.append(expert_indices[j].cpu().item())
+                # top_k=1: 标量；top_k>1: 记录主专家（第1路）以兼容既有可视化脚本
+                if expert_indices.dim() == 1:
+                    all_expert_indices.append(expert_indices[j].cpu().item())
+                else:
+                    all_expert_indices.append(expert_indices[j, 0].cpu().item())
 
         correct += torch.sum(pred == gold).item()  # 更新正确预测计数
 
