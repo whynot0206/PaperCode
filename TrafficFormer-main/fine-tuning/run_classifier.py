@@ -262,7 +262,7 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
                 if expert_indices.dim() == 1:
                     all_expert_indices.append(expert_indices[j].cpu().item())
                 else:
-                    all_expert_indices.append(expert_indices[j, 0].cpu().item())
+                    all_expert_indices.append(expert_indices[j].cpu().tolist())
 
         correct += torch.sum(pred == gold).item()  # 更新正确预测计数
 

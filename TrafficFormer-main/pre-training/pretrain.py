@@ -1550,3 +1550,223 @@ python3 fine-tuning/run_classifier.py \
     --macro_router_target_entropy 0.3 \
     ---macro_load_balance 2.0 
 '''
+
+'''
+终极调整后，将专家改成top-2的step1：
+python3 pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.02 \
+    --macro_router_target_entropy 0.88 \
+    --macro_load_balance 0.1 \
+    --warmup 0.1
+    
+    
+step2:
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_top2_rebalance.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 18 \
+    --earlystop 8 \
+    --batch_size 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --dropout 0.35 \
+    --learning_rate 1.5e-5 \
+    --warmup 0.1 \
+    --macro_router_noise_std 0.08 \
+    --macro_router_balance_weight 1.2 \
+    --macro_router_entropy_weight 2.0 \
+    --macro_router_target_entropy 0.98 \
+    --macro_load_balance 0.45
+
+Test set evaluation.
+Confusion matrix:
+tensor([[31,  8,  5,  0,  3,  1],
+        [ 3,  7,  0,  0,  0,  0],
+        [ 1,  0, 26,  0,  0,  0],
+        [ 1,  0,  0, 14,  0,  0],
+        [ 1,  0,  1,  0, 14,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.646, 0.838, 0.729
+Label 1: 0.700, 0.467, 0.560
+Label 2: 0.963, 0.812, 0.881
+Label 3: 0.933, 1.000, 0.966
+Label 4: 0.875, 0.824, 0.848
+Label 5: 1.000, 0.833, 0.909
+路由数据已保存：routing_analysis.json!
+Acc. (Correct/Total): 0.8017 (97/121)
+Macro precision: 0.8529, Micro precision: 0.8017, Weighted precision: 0.8194
+Macro recall: 0.7956, Micro recall: 0.8017, Weighted recall: 0.8017
+Macro f1: 0.8156, Micro f1: 0.8017, Weighted f1: 0.8016
+
+这部分的专家图对应v10
+
+
+
+
+第二次调命令：
+step1:
+python3 pre-training/pretrain.py \
+    --dataset_path data_generation/data/pretrain_dataset.pt \
+    --vocab_path models/encryptd_vocab.txt \
+    --output_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin \
+    --config_path models/bert/base_config.json \
+    --world_size 1 \
+    --gpu_ranks 0 \
+    --total_steps 90000 \
+    --report_steps 100 \
+    --save_checkpoint_steps 10000 \
+    --batch_size 8 \
+    --accumulation_steps 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --target bertflow \
+    --learning_rate 6e-5 \
+    --macro_router_noise_std 0.02 \
+    --macro_router_target_entropy 0.88 \
+    --macro_load_balance 0.1 \
+    --warmup 0.1
+step2:
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_top3_rebalance.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 20 \
+    --earlystop 8 \
+    --batch_size 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 3 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --dropout 0.35 \
+    --learning_rate 1.2e-5 \
+    --warmup 0.1 \
+    --macro_router_noise_std 0.10 \
+    --macro_router_balance_weight 1.5 \
+    --macro_router_entropy_weight 2.5 \
+    --macro_router_target_entropy 0.98 \
+    --macro_load_balance 0.55
+
+]
+Test set evaluation.
+Confusion matrix:
+tensor([[36,  2,  0,  0,  3,  0],
+        [ 0, 13,  0,  0,  0,  0],
+        [ 0,  0, 31,  0,  0,  0],
+        [ 0,  0,  0, 14,  0,  0],
+        [ 1,  0,  1,  0, 14,  0],
+        [ 0,  0,  0,  0,  0,  6]])
+Report precision, recall, and f1:
+Label 0: 0.878, 0.973, 0.923
+Label 1: 1.000, 0.867, 0.929
+Label 2: 1.000, 0.969, 0.984
+Label 3: 1.000, 1.000, 1.000
+Label 4: 0.875, 0.824, 0.848
+Label 5: 1.000, 1.000, 1.000
+路由数据已保存：routing_analysis.json!
+Acc. (Correct/Total): 0.9421 (114/121)
+Macro precision: 0.9588, Micro precision: 0.9421, Weighted precision: 0.9451
+Macro recall: 0.9387, Micro recall: 0.9421, Weighted recall: 0.9421
+Macro f1: 0.9474, Micro f1: 0.9421, Weighted f1: 0.9421
+
+保存图为v11，专家都没怎么用上
+
+
+现在主要是调step2命令参数：
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_top2_rebalance_v2.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 18 \
+    --earlystop 8 \
+    --batch_size 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --dropout 0.35 \
+    --learning_rate 1.5e-5 \
+    --warmup 0.1 \
+    --macro_router_noise_std 0.06 \
+    --macro_router_balance_weight 1.0 \
+    --macro_router_entropy_weight 1.8 \
+    --macro_router_target_entropy 0.95 \
+    --macro_load_balance 0.35
+   
+Test set evaluation.
+Confusion matrix:
+tensor([[33,  8, 12,  1,  7,  1],
+        [ 0,  7,  0,  0,  0,  0],
+        [ 3,  0, 19,  0,  0,  0],
+        [ 1,  0,  0, 13,  0,  0],
+        [ 0,  0,  1,  0, 10,  0],
+        [ 0,  0,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.532, 0.892, 0.667
+Label 1: 1.000, 0.467, 0.636
+Label 2: 0.864, 0.594, 0.704
+Label 3: 0.929, 0.929, 0.929
+Label 4: 0.909, 0.588, 0.714
+Label 5: 1.000, 0.833, 0.909
+路由数据已保存：routing_analysis.json!
+Acc. (Correct/Total): 0.7190 (87/121)
+Macro precision: 0.8723, Micro precision: 0.7190, Weighted precision: 0.7999
+Macro recall: 0.7171, Micro recall: 0.7190, Weighted recall: 0.7190
+Macro f1: 0.7598, Micro f1: 0.7190, Weighted f1: 0.7217
+
+这保存在v12，但是效果很差，但是专家都用上了
+
+换一个增强数据集试试效果train_enhance5_dataset.tsv
+'''
