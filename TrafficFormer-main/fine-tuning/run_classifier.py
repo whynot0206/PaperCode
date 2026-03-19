@@ -38,8 +38,12 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         self.soft_targets = args.soft_targets  # 设置是否使用软目标
         self.soft_alpha = args.soft_alpha  # 设置软目标权重
         self.macro_load_balance = getattr(args, "macro_load_balance", 0.1)
+        self.class_weights = None  # 可选：按训练集标签频率自动计算的类别权重
         self.output_layer_1 = nn.Linear(args.hidden_size, args.hidden_size)  # 创建第一个输出层
         self.output_layer_2 = nn.Linear(args.hidden_size, self.labels_num)  # 创建第二个输出层（分类层）
+
+    def set_class_weights(self, class_weights):
+        self.class_weights = class_weights
 
     def forward(self, src, tgt, seg, soft_tgt=None):  # 前向传播函数
         """
@@ -73,12 +77,13 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         output = torch.tanh(self.output_layer_1(output))  # 通过第一个输出层并使用tanh激活函数
         logits = self.output_layer_2(output)  # 通过第二个输出层获取分类logits
         if tgt is not None:  # 如果有目标标签（训练模式）
+            loss_fct = nn.NLLLoss(weight=self.class_weights.to(logits.device) if self.class_weights is not None else None)
             if self.soft_targets and soft_tgt is not None:  # 如果使用软目标且提供了软目标
                 loss = self.soft_alpha * nn.MSELoss()(logits, soft_tgt) + \
-                       (1 - self.soft_alpha) * nn.NLLLoss()(nn.LogSoftmax(dim=-1)(logits),
-                                                            tgt.view(-1))  # 计算混合损失（MSE + NLL）
+                       (1 - self.soft_alpha) * loss_fct(nn.LogSoftmax(dim=-1)(logits),
+                                                        tgt.view(-1))  # 计算混合损失（MSE + NLL）
             else:  # 如果不使用软目标
-                loss = nn.NLLLoss()(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
+                loss = loss_fct(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
 
             if isinstance(self.encoder, MacroMoEEncoder) and isinstance(gate_loss, torch.Tensor):
                 loss = loss + self.macro_load_balance * gate_loss
@@ -101,6 +106,18 @@ def count_labels_num(path):  # 计算标签数量的函数
             label = int(line[columns["label"]])  # 获取标签值
             labels_set.add(label)  # 添加到标签集合
     return len(labels_set)  # 返回标签数量
+
+
+def build_class_weights(dataset, labels_num, power=0.5):  # 根据训练集标签分布构建类别权重
+    label_counts = torch.zeros(labels_num, dtype=torch.float)
+    for sample in dataset:
+        label_counts[sample[1]] += 1.0
+
+    # 防止某些类别计数为 0 导致除零。
+    safe_counts = torch.clamp(label_counts, min=1.0)
+    class_weights = (safe_counts.sum() / (labels_num * safe_counts)).pow(power)
+    class_weights = class_weights / class_weights.mean()
+    return class_weights
 
 
 def load_or_initialize_parameters(args, model):  # 加载或初始化模型参数的函数
@@ -239,7 +256,7 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
     # Confusion matrix.
     confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)  # 初始化混淆矩阵
     y_true, y_pred = [], []  # 初始化真实标签和预测标签列表
-    all_expert_indices = []  # <--- 新增：用于收集所有的专家分配结果
+    all_expert_indices = []  # 记录每个样本的 Top-k 专家索引（按 rank 顺序）
     args.model.eval()  # 设置模型为评估模式
 
     for i, (src_batch, tgt_batch, seg_batch, _) in enumerate(batch_loader(batch_size, src, tgt, seg)):  # 遍历批次数据
@@ -256,9 +273,9 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
             y_true.append(gold[j].cpu())  # 添加真实标签到列表
             y_pred.append(pred[j].cpu())  # 添加预测标签到列表
 
-            # 新增：把这个样本的路由结果存下来
+            # 把这个样本的路由结果存下来。
+            # 注意：top_k>1 时列表顺序就是 rank-1, rank-2, ...，后续可直接做分 rank 分析。
             if expert_indices is not None:
-                # top_k=1: 标量；top_k>1: 记录主专家（第1路）以兼容既有可视化脚本
                 if expert_indices.dim() == 1:
                     all_expert_indices.append(expert_indices[j].cpu().item())
                 else:
@@ -286,9 +303,17 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
 
         if len(all_expert_indices) > 0:
             import json
+            inferred_top_k = 1
+            if any(isinstance(expert, list) for expert in all_expert_indices):
+                inferred_top_k = max(len(expert) if isinstance(expert, list) else 1 for expert in all_expert_indices)
             routing_data = {
                 "true_labels": [int(y) for y in y_true],
-                "expert_indices": all_expert_indices
+                "expert_indices": all_expert_indices,
+                "top_k": inferred_top_k,
+                "rank_expert_indices": [
+                    expert if isinstance(expert, list) else [expert]
+                    for expert in all_expert_indices
+                ],
             }
             with open("routing_analysis.json", "w") as f:
                 json.dump(routing_data, f)  # <--- 直接把数据 dump 给文件对象 f
@@ -296,16 +321,16 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
 
     print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct / len(dataset), correct, len(dataset)))  # 打印准确率
     print("Macro precision: {:.4f}, Micro precision: {:.4f}, Weighted precision: {:.4f}".format(
-        precision_score(y_true, y_pred, average='macro'), precision_score(y_true, y_pred, average='micro'),
-        precision_score(y_true, y_pred, average='weighted')))  # 打印各种精确率
+        precision_score(y_true, y_pred, average='macro', zero_division=0), precision_score(y_true, y_pred, average='micro', zero_division=0),
+        precision_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种精确率
     print("Macro recall: {:.4f}, Micro recall: {:.4f}, Weighted recall: {:.4f}".format(
-        recall_score(y_true, y_pred, average='macro'), recall_score(y_true, y_pred, average='micro'),
-        recall_score(y_true, y_pred, average='weighted')))  # 打印各种召回率
+        recall_score(y_true, y_pred, average='macro', zero_division=0), recall_score(y_true, y_pred, average='micro', zero_division=0),
+        recall_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种召回率
     print("Macro f1: {:.4f}, Micro f1: {:.4f}, Weighted f1: {:.4f}".format(
-        f1_score(y_true, y_pred, average='macro'), f1_score(y_true, y_pred, average='micro'),
-        f1_score(y_true, y_pred, average='weighted')))  # 打印各种F1分数
+        f1_score(y_true, y_pred, average='macro', zero_division=0), f1_score(y_true, y_pred, average='micro', zero_division=0),
+        f1_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种F1分数
 
-    return f1_score(y_true, y_pred, average='macro'), confusion  # 返回宏F1分数和混淆矩阵
+    return f1_score(y_true, y_pred, average='macro', zero_division=0), confusion  # 返回宏F1分数和混淆矩阵
 
 
 def main():  # 主函数
@@ -391,6 +416,9 @@ def main():  # 主函数
     random.shuffle(trainset)  # 打乱训练数据集
     instances_num = len(trainset)  # 获取训练实例数量
     batch_size = args.batch_size  # 获取批次大小
+    class_weights = build_class_weights(trainset, args.labels_num)
+    model.set_class_weights(class_weights.to(args.device))
+    print("Class weights:", ["{:.3f}".format(weight) for weight in class_weights.tolist()])
 
     src = torch.LongTensor([example[0] for example in trainset])  # 创建训练源数据张量
     tgt = torch.LongTensor([example[1] for example in trainset])  # 创建训练目标数据张量

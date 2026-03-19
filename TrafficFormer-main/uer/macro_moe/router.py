@@ -18,9 +18,14 @@ class ProtocolRouter(nn.Module):
 
         # 统计 Buffer (用于日志打印)
         self.register_buffer("usage_counter", torch.zeros(num_experts, dtype=torch.long))
+        # 按 Top-k 的“第几路”分别统计：
+        # rank_usage_counter[r, e] = 第 r+1 路选择 expert e 的次数
+        # 形状固定为 [num_experts, num_experts]，实际只使用前 top_k 行。
+        self.register_buffer("rank_usage_counter", torch.zeros(num_experts, num_experts, dtype=torch.long))
 
     def reset_usage(self):
         self.usage_counter.zero_()
+        self.rank_usage_counter.zero_()
 
     def forward(self, proto_ids=None, inputs_embeds=None, top_k=1):
         """
@@ -122,12 +127,25 @@ class ProtocolRouter(nn.Module):
 
         # ================= 统计更新 =================
         with torch.no_grad():
-            # 统计这一轮每个专家实际吃了多少数据
+            # 统计这一轮每个专家实际吃了多少“被选择”次数：
+            # - top_k=1: 每个样本贡献 1 次
+            # - top_k>1: 每个样本贡献 k 次（分别对应 rank-1...rank-k）
             if top_k == 1:
                 for i in range(self.num_experts):
                     self.usage_counter[i] += (expert_indices == i).sum()
-            else:
+                # 第 1 路统计
                 for i in range(self.num_experts):
-                    self.usage_counter[i] += (expert_indices == i).any(dim=-1).sum()
+                    self.rank_usage_counter[0, i] += (expert_indices == i).sum()
+            else:
+                # all-selected 统计：按“k 路总选择次数”累计
+                flat_indices = expert_indices.reshape(-1)
+                for i in range(self.num_experts):
+                    self.usage_counter[i] += (flat_indices == i).sum()
+
+                # 分路统计：第 r 路选择了哪个专家
+                for r in range(top_k):
+                    rank_indices = expert_indices[:, r]
+                    for i in range(self.num_experts):
+                        self.rank_usage_counter[r, i] += (rank_indices == i).sum()
 
         return expert_indices, load_balance_loss, router_probs_values
