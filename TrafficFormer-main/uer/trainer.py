@@ -136,12 +136,24 @@ class Trainer(object):  # 定义训练器基类
                     if hasattr(raw_model, "encoder"):
                         if hasattr(raw_model.encoder, "router"):
                             router = raw_model.encoder.router
+                            top_k = getattr(raw_model.encoder, "top_k", 1)
                             usage = router.usage_counter.cpu().tolist()
                             total = sum(usage) + 1e-6
                             usage_ratio = [u / total for u in usage]
 
-                            print("  [MoE Router Usage] count =", usage)
-                            print("  [MoE Router Usage] ratio =", ["{:.3f}".format(r) for r in usage_ratio])
+                            print(f"  [MoE Router Usage] top_k = {top_k}")
+                            print("  [MoE Router Usage] count (all selected routes, sum over k) =", usage)
+                            print("  [MoE Router Usage] ratio (all selected routes, sum over k) =", ["{:.3f}".format(r) for r in usage_ratio])
+
+                            # 按第几路分别打印（rank-1 / rank-2 / ... / rank-k）
+                            if hasattr(router, "rank_usage_counter"):
+                                rank_usage = router.rank_usage_counter.cpu()
+                                for r in range(top_k):
+                                    rank_count = rank_usage[r].tolist()
+                                    rank_total = sum(rank_count) + 1e-6
+                                    rank_ratio = [u / rank_total for u in rank_count]
+                                    print(f"  [MoE Router Usage] count (rank-{r + 1}) =", rank_count)
+                                    print(f"  [MoE Router Usage] ratio (rank-{r + 1}) =", ["{:.3f}".format(v) for v in rank_ratio])
 
                             # ====== 打印后立刻 reset，形成滑动窗口统计 ======
                             router.reset_usage()
