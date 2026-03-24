@@ -1768,5 +1768,84 @@ Macro f1: 0.7598, Micro f1: 0.7190, Weighted f1: 0.7217
 
 这保存在v12，但是效果很差，但是专家都用上了
 
-换一个增强数据集试试效果train_enhance5_dataset.tsv
+test
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin-90000 \
+    --output_model_path models/finetuned_grid_A.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 16 \
+    --earlystop 6 \
+    --batch_size 12 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --dropout 0.30 \
+    --learning_rate 2e-5 \
+    --warmup 0.1 \
+    --macro_router_noise_std 0.08 \
+    --macro_router_target_entropy 0.90 \
+    --macro_load_balance 0.28 \
+    --macro_router_balance_weight 1.4
+
+
+python3 fine-tuning/run_classifier.py \
+    --vocab_path models/encryptd_vocab.txt \
+    --train_path ISCX-VPN_dataset/dataset/train_dataset.tsv \
+    --dev_path ISCX-VPN_dataset/dataset/valid_dataset.tsv \
+    --test_path ISCX-VPN_dataset/dataset/test_dataset.tsv \
+    --pretrained_model_path models/pretrain_model_macro_moe_4e_adapter+backone_top2_ckpt.bin-90000 \
+    --output_model_path models/finetuned_model_stage2_v19_recover_acc.bin \
+    --config_path models/bert/base_config.json \
+    --epochs_num 24 \
+    --earlystop 10 \
+    --batch_size 8 \
+    --embedding word_pos_seg \
+    --encoder macro_moe \
+    --macro_expert_num 4 \
+    --macro_top_k 2 \
+    --macro_checkpoint_experts \
+    --adapter_size 32 \
+    --mask fully_visible \
+    --seq_length 320 \
+    --dropout 0.27 \
+    --learning_rate 2.2e-5 \
+    --warmup 0.1 \
+    --macro_router_noise_std 0.045 \
+    --macro_router_balance_weight 0.75 \
+    --macro_router_entropy_weight 1.0 \
+    --macro_router_target_entropy 0.84 \
+    --macro_load_balance 0.10
+
+]
+Test set evaluation.
+Confusion matrix:
+tensor([[35,  1,  2,  0,  2,  1],
+        [ 1, 13,  0,  0,  1,  0],
+        [ 1,  0, 29,  0,  0,  0],
+        [ 0,  0,  0, 14,  0,  0],
+        [ 0,  0,  1,  0, 14,  0],
+        [ 0,  1,  0,  0,  0,  5]])
+Report precision, recall, and f1:
+Label 0: 0.854, 0.946, 0.897
+Label 1: 0.867, 0.867, 0.867
+Label 2: 0.967, 0.906, 0.935
+Label 3: 1.000, 1.000, 1.000
+Label 4: 0.933, 0.824, 0.875
+Label 5: 0.833, 0.833, 0.833
+路由数据已保存：routing_analysis.json!
+Acc. (Correct/Total): 0.9091 (110/121)
+Macro precision: 0.9089, Micro precision: 0.9091, Weighted precision: 0.9123
+Macro recall: 0.8960, Micro recall: 0.9091, Weighted recall: 0.9091
+Macro f1: 0.9013, Micro f1: 0.9091, Weighted f1: 0.9092
+
+对应v14
 '''
