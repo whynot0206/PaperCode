@@ -5,13 +5,17 @@ import torch.nn.functional as F
 
 class ProtocolRouter(nn.Module):
     def __init__(self, num_experts, hidden_size, noise_std=0.01,
-                 balance_weight=0.2, entropy_weight=1.0, target_entropy=0.6):
+                 balance_weight=0.2, entropy_weight=1.0, target_entropy=0.6,
+                 rank1_weight=0.0, rank2_weight=0.0, rank_target_entropy=0.45):
         super(ProtocolRouter, self).__init__()
         self.num_experts = num_experts
         self.noise_std = noise_std
         self.balance_weight = balance_weight
         self.entropy_weight = entropy_weight
         self.target_entropy = target_entropy
+        self.rank1_weight = rank1_weight
+        self.rank2_weight = rank2_weight
+        self.rank_target_entropy = rank_target_entropy
         # 1. 门控层 (Gating Network) - 对应 Formula 5
         # 用于将输入特征映射到专家权重
         self.gate = nn.Linear(hidden_size, num_experts)
@@ -26,6 +30,24 @@ class ProtocolRouter(nn.Module):
     def reset_usage(self):
         self.usage_counter.zero_()
         self.rank_usage_counter.zero_()
+
+    def _normalized_entropy(self, prob):
+        prob = prob / (prob.sum() + 1e-9)
+        normalizer = torch.log(torch.tensor(float(self.num_experts), device=prob.device))
+        return -(prob * torch.log(prob + 1e-9)).sum() / normalizer
+
+    def _rank_regularizer(self, rank_indices, router_probs):
+        rank_mask = F.one_hot(rank_indices, num_classes=self.num_experts).float()
+        rank_fraction = rank_mask.mean(dim=0)
+
+        # Use the selected rank mask to keep gradients on the probabilities of
+        # experts that actually win this routing slot.
+        rank_prob = (rank_mask * router_probs).mean(dim=0)
+        rank_prob = rank_prob / (rank_prob.sum() + 1e-9)
+
+        uniform_balance = self.num_experts * (rank_prob * rank_fraction).sum()
+        entropy_target_loss = (self._normalized_entropy(rank_prob) - self.rank_target_entropy) ** 2
+        return self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
 
     def forward(self, proto_ids=None, inputs_embeds=None, top_k=1):
         """
@@ -117,13 +139,26 @@ class ProtocolRouter(nn.Module):
         uniform_balance = (self.num_experts * (prob_per_expert * fraction_per_expert).sum())
 
         # 【修复点】：将 fraction_per_expert 替换为 prob_per_expert，恢复梯度回传！
-        norm_entropy = -(
-                prob_per_expert * torch.log(prob_per_expert + 1e-9)
-        ).sum() / torch.log(torch.tensor(float(self.num_experts), device=router_probs.device))
+        norm_entropy = self._normalized_entropy(prob_per_expert)
 
         entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
 
         load_balance_loss = self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
+
+        if top_k == 1:
+            if self.rank1_weight > 0:
+                load_balance_loss = load_balance_loss + self.rank1_weight * self._rank_regularizer(
+                    expert_indices, router_probs
+                )
+        else:
+            if self.rank1_weight > 0:
+                load_balance_loss = load_balance_loss + self.rank1_weight * self._rank_regularizer(
+                    expert_indices[:, 0], router_probs
+                )
+            if self.rank2_weight > 0:
+                load_balance_loss = load_balance_loss + self.rank2_weight * self._rank_regularizer(
+                    expert_indices[:, 1], router_probs
+                )
 
         # ================= 统计更新 =================
         with torch.no_grad():

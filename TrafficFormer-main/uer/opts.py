@@ -47,12 +47,20 @@ def model_opts(parser):
                         help="Weight of entropy-target term inside Macro MoE router aux loss.")
     parser.add_argument("--macro_router_target_entropy", type=float, default=0.6,
                         help="Target normalized routing entropy in [0,1]. Lower means more specialization.")
+    parser.add_argument("--macro_router_rank1_weight", type=float, default=0.0,
+                        help="Extra anti-collapse weight for rank-1 routing. Default 0 disables it.")
+    parser.add_argument("--macro_router_rank2_weight", type=float, default=0.0,
+                        help="Extra anti-collapse weight for rank-2 routing when top-k > 1. Default 0 disables it.")
+    parser.add_argument("--macro_router_rank_target_entropy", type=float, default=0.45,
+                        help="Target normalized entropy for rank-specific anti-collapse losses.")
     parser.add_argument("--macro_load_balance", type=float, default=0.1,
                         help="Global weight of the gate loss in total loss (replacing moebert_load_balance).")
     parser.add_argument("--macro_top_k", type=int, default=1,
                         help="Top-k experts selected by Macro MoE router. Use 2 to reduce expert collapse.")
     parser.add_argument("--macro_checkpoint_experts", action='store_true',
                         help="Enable gradient checkpointing on Macro-MoE experts to reduce GPU memory usage.")
+    parser.add_argument("--macro_shared_backbone", action='store_true',
+                        help="Use one shared TrafficFormer backbone and route lightweight adapter experts on top of it.")
 
 def optimization_opts(parser):
     parser.add_argument("--learning_rate", type=float, default=2e-5,

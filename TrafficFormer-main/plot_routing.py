@@ -13,6 +13,19 @@ DEFAULT_CLASS_NAMES = [
     "vpn-streaming",
     "vpn-voip",
 ]
+'''DEFAULT_CLASS_NAMES = [
+    "bittorrent",
+    "email",
+    "facebook",
+    "hangouts",
+    "netflix",
+    "skype",
+    "spotify",
+    "vimeo",
+    "voipbuster",
+    "youtube",
+    "file"
+]'''
 
 
 def normalize_rows(matrix):
@@ -121,7 +134,7 @@ draw_heatmap(
     class_names,
     num_experts,
     "Router Dispatch Preference (Macro-MoE Top-K)",
-    "routing_heatmap_v1_4e_adapter+backbone_top1.png",
+    "routing_heatmap_v1_4e_adapter+backbone_top2_ISCX-VPN-Service-rankloss1.png",
 )
 
 for rank_id, matrix in enumerate(rank_routing_matrices):
@@ -130,7 +143,7 @@ for rank_id, matrix in enumerate(rank_routing_matrices):
         class_names,
         num_experts,
         f"Router Dispatch Preference (Rank-{rank_id + 1})",
-        f"routing_heatmap_rank{rank_id + 1}_v1_4e_adapter+backbone_top1.png",
+        f"routing_heatmap_rank{rank_id + 1}_v1_4e_adapter+backbone_top2_ISCX-VPN-Service-rankloss1.png",
     )
 
 if len(rank_routing_matrices) > 1:
@@ -138,5 +151,5 @@ if len(rank_routing_matrices) > 1:
         rank_routing_matrices,
         class_names,
         num_experts,
-        "routing_heatmap_ranks_v1_4e_adapter+backbone_top1.png",
+        "routing_heatmap_ranks_v1_4e_adapter+backbone_top2_ISCX-VPN-Service-rankloss1.png",
     )

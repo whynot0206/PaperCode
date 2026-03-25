@@ -89,3 +89,37 @@ class TrafficMacroExpert(nn.Module):
         features = self.adapter(features)
 
         return features
+
+
+class TrafficSharedAdapterExpert(nn.Module):
+    """
+    Lightweight expert used with a shared TrafficFormer backbone.
+    It only learns a residual delta on top of the shared hidden states.
+    """
+
+    def __init__(self, args):
+        super(TrafficSharedAdapterExpert, self).__init__()
+        hidden_size = args.hidden_size
+        adapter_size = getattr(args, "adapter_size", 32)
+        dropout = getattr(args, "dropout", 0.1)
+
+        self.down_project = nn.Linear(hidden_size, adapter_size)
+        self.activation = nn.ReLU()
+        self.dropout = nn.Dropout(dropout)
+        self.up_project = nn.Linear(adapter_size, hidden_size)
+
+    def set_adaptation_mode(self, mode=True):
+        # Kept for interface compatibility with TrafficMacroExpert.
+        for param in self.parameters():
+            param.requires_grad = True
+        self.train(mode)
+
+    def get_backbone_grad_norm(self):
+        return 0.0
+
+    def forward(self, shared_hidden):
+        delta = self.down_project(shared_hidden)
+        delta = self.activation(delta)
+        delta = self.dropout(delta)
+        delta = self.up_project(delta)
+        return delta

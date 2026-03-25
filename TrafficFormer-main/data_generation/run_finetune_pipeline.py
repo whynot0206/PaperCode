@@ -22,9 +22,9 @@ def main():
     ROOT_DIR = "/home/xuke/why_code/trafficformer"
 
     # 原始数据路径
-    RAW_PCAP_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN")
-    SPLIT_OUTPUT_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN_split")
-    DATASET_OUTPUT_DIR = os.path.join(ROOT_DIR, "ISCX-VPN_dataset")
+    RAW_PCAP_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN-App")
+    SPLIT_OUTPUT_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN-App_split")
+    DATASET_OUTPUT_DIR = os.path.join(ROOT_DIR, "ISCX-VPN-App_dataset")
 
     FEATURES = ['datagram', "length", "time", "direction", "message_type"]
 
