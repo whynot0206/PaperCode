@@ -57,6 +57,20 @@ class MacroMoEEncoder(nn.Module):
             else:
                 self.shared_backbone.train()
 
+            # Original shared-backbone few-shot behavior kept for rollback reference:
+            # router remained trainable while only the shared backbone was frozen.
+            #
+            # In the current small-sample setting, we freeze the router together with
+            # the shared backbone so the model only adapts the lightweight expert
+            # deltas (plus the classifier head outside this module). This better
+            # matches the "fast adapter-style adaptation" objective.
+            for param in self.router.parameters():
+                param.requires_grad = not mode
+            if mode:
+                self.router.eval()
+            else:
+                self.router.train()
+
         for expert in self.experts:
             expert.set_adaptation_mode(mode)
 
