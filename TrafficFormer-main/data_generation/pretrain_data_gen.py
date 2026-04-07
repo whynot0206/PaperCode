@@ -425,6 +425,150 @@ def get_bursts(label_pcap, select_packet_len, corpora_path, start_index=0, enhan
     return 0  # 返回成功代码
 
 # 获取连续数据包的函数，从原始流量包中提取连续的、属于同一个流（flow）的数据包序列。
+def _extract_packet_window(packet_data, packet_direction, start_index, select_packet_len, no_ether):
+    data = binascii.hexlify(bytes(packet_data)).decode()
+    if no_ether:
+        if packet_direction == 1:
+            data = "c49a025996f8e46f13e2e3ae0800" + data
+        else:
+            data = "e46f13e2e3aec49a025996f80800" + data
+    end_index = start_index + 2 * select_packet_len
+    return data[start_index:end_index]
+
+
+def _overwrite_hex_field(packet_string, byte_offset, byte_length, fill_hex="00"):
+    start = byte_offset * 2
+    end = start + byte_length * 2
+    if end > len(packet_string):
+        return packet_string
+    return packet_string[:start] + (fill_hex * byte_length) + packet_string[end:]
+
+
+def sanitize_packet_window(packet_string, proto_type):
+    """
+    Keep the packet window shape unchanged while removing shortcut-prone identifiers.
+    The offsets assume the packet window starts from the IPv4 header.
+    """
+    if len(packet_string) < 40:
+        return packet_string
+
+    sanitized = packet_string
+    for byte_offset, byte_length in ((4, 2), (12, 4), (16, 4)):
+        sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
+
+    if proto_type == 6:
+        for byte_offset, byte_length in ((20, 2), (22, 2), (24, 4), (28, 4)):
+            sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
+    elif proto_type == 17:
+        for byte_offset, byte_length in ((20, 2), (22, 2)):
+            sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
+
+    return sanitized
+
+
+def get_bursts_moe(label_pcap, select_packet_len, corpora_path, start_index=0, enhance_factor=1,
+                   is_multi=False):
+    if is_multi:
+        pid = os.getpid()
+
+    try:
+        packets = scapy.rdpcap(label_pcap)
+    except Scapy_Exception as e:
+        print(f"WARNING: worker {pid if is_multi else 'Main'} failed to read pcap: {label_pcap}. error: {e}",
+              file=sys.stderr)
+        return 0
+
+    if len(packets) == 0:
+        if is_multi:
+            print(f"WARNING: worker {pid} encountered empty pcap: {label_pcap}", file=sys.stderr)
+        return 0
+
+    no_ether = not hasattr(packets[0], 'type')
+    if (not no_ether and packets[0].type == 0x86dd) or (no_ether and packets[0].version == 6):
+        return 0
+
+    packet_direction = []
+    try:
+        feature_result = extract(label_pcap)
+        for key in feature_result.keys():
+            value = feature_result[key]
+            packet_direction = [x // abs(x) for x in value.ip_lengths]
+    except Exception as e:
+        print(f"ERROR: worker {pid if is_multi else 'Main'} failed to extract flow features: {label_pcap}. error: {e}",
+              file=sys.stderr)
+        return 0
+
+    if len(packet_direction) != len(packets):
+        return 0
+
+    burst_txt = ''
+    for en in range(enhance_factor):
+        current_packets = packets if en == 0 else enhancement(packets)
+        packetss = []
+        packet_directionss = []
+        new_packet_direction = []
+        new_packets = scapy.PacketList()
+        for packet_index in range(len(current_packets)):
+            new_packets.append(current_packets[packet_index])
+            new_packet_direction.append(packet_direction[packet_index])
+            if (packet_index + 1) % 100 == 0:
+                packetss.append(new_packets)
+                packet_directionss.append(new_packet_direction)
+                new_packets = scapy.PacketList()
+                new_packet_direction = []
+        if len(new_packets) > 0:
+            packetss.append(new_packets)
+            packet_directionss.append(new_packet_direction)
+
+        for pp in range(len(packetss)):
+            chunk_packets = packetss[pp]
+            chunk_directions = packet_directionss[pp]
+            burst_data_string = ''
+            for packet_index in range(len(chunk_packets)):
+                packet_data = chunk_packets[packet_index].copy()
+                packet_string = _extract_packet_window(
+                    packet_data,
+                    chunk_directions[packet_index],
+                    start_index,
+                    select_packet_len,
+                    no_ether,
+                )
+
+                if no_ether:
+                    proto_type = packet_data.proto if hasattr(packet_data, "proto") else -1
+                else:
+                    proto_type = packet_data.payload.proto if packet_data.type == 0x0800 else -1
+                packet_string = sanitize_packet_window(packet_string, proto_type)
+
+                if packet_index == 0:
+                    packet_string = "||" + packet_string
+                    burst_data_string += packet_string
+                else:
+                    if chunk_directions[packet_index] != chunk_directions[packet_index - 1]:
+                        length = len(burst_data_string)
+                        for string_txt in cut(burst_data_string, int(length / 2)):
+                            burst_txt += string_txt
+                            burst_txt += '\n'
+                        burst_txt += '\n'
+                        burst_data_string = ''
+
+                    burst_data_string += packet_string
+                    if packet_index == len(chunk_packets) - 1:
+                        length = len(burst_data_string)
+                        for string_txt in cut(burst_data_string, int(length / 2)):
+                            burst_txt += string_txt
+                            burst_txt += '\n'
+                        burst_txt += '\n'
+
+    if is_multi:
+        with open(corpora_path + "{}_biburst.txt".format(pid), 'a') as f:
+            f.write(burst_txt)
+    else:
+        with open(corpora_path, 'a') as f:
+            f.write(burst_txt)
+    return 0
+
+
 def get_consecutive_packets(label_pcap, select_packet_len, corpora_path, start_index=0):
     packets = scapy.rdpcap(label_pcap)  # 读取pcap文件
 

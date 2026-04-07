@@ -73,6 +73,14 @@ class TrafficMacroExpert(nn.Module):
         # L2 Norm = sqrt(sum ||g_i||^2)
         return total_sq_norm ** 0.5
 
+    def get_trainable_grad_norm(self):
+        total_sq_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2).item()
+                total_sq_norm += param_norm ** 2
+        return total_sq_norm ** 0.5
+
     def forward(self, emb, seg):
         # 1. 骨干提取特征
         if self.adaptation_mode:
@@ -116,6 +124,14 @@ class TrafficSharedAdapterExpert(nn.Module):
 
     def get_backbone_grad_norm(self):
         return 0.0
+
+    def get_trainable_grad_norm(self):
+        total_sq_norm = 0.0
+        for p in self.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2).item()
+                total_sq_norm += param_norm ** 2
+        return total_sq_norm ** 0.5
 
     def forward(self, shared_hidden):
         delta = self.down_project(shared_hidden)

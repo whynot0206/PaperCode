@@ -170,7 +170,10 @@ class Trainer(object):  # 定义训练器基类
                         if hasattr(raw_model.encoder, "experts"):
                             print("  [MoE Expert Grad Norms]")
                             for i, expert in enumerate(raw_model.encoder.experts):
-                                grad_norm = expert.get_backbone_grad_norm()
+                                if hasattr(expert, "get_trainable_grad_norm"):
+                                    grad_norm = expert.get_trainable_grad_norm()
+                                else:
+                                    grad_norm = expert.get_backbone_grad_norm()
                                 print(f"    Expert-{i}: grad_norm = {grad_norm:.6f}")
                             experts_found = True
                         else:
