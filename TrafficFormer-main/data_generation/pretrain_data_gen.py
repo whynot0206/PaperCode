@@ -11,6 +11,8 @@ import multiprocessing as mp  # 导入多进程处理模块
 import traceback  # 导入异常追踪模块
 from scapy.error import Scapy_Exception
 import platform
+
+
 def user_excepthook(tp, val, tb):  # 用户异常处理函数
     # print the exception to standard error
     traceback.print_exc()  # 打印异常信息到标准错误
@@ -424,6 +426,7 @@ def get_bursts(label_pcap, select_packet_len, corpora_path, start_index=0, enhan
 
     return 0  # 返回成功代码
 
+
 # 获取连续数据包的函数，从原始流量包中提取连续的、属于同一个流（flow）的数据包序列。
 def _extract_packet_window(packet_data, packet_direction, start_index, select_packet_len, no_ether):
     data = binascii.hexlify(bytes(packet_data)).decode()
@@ -466,26 +469,117 @@ def sanitize_packet_window(packet_string, proto_type):
     return sanitized
 
 
-def get_bursts_moe(label_pcap, select_packet_len, corpora_path, start_index=0, enhance_factor=1,
-                   is_multi=False):
-    if is_multi:
-        pid = os.getpid()
+def _get_proto_type(packet_data, no_ether):
+    if no_ether:
+        return packet_data.proto if hasattr(packet_data, "proto") else -1
+    if getattr(packet_data, "type", None) == 0x0800 and hasattr(packet_data, "payload"):
+        return packet_data.payload.proto if hasattr(packet_data.payload, "proto") else -1
+    return -1
+
+
+def _flush_burst_data_string(burst_data_string):
+    if not burst_data_string:
+        return ""
+    burst_txt = ""
+    length = len(burst_data_string)
+    for string_txt in cut(burst_data_string, int(length / 2)):
+        burst_txt += string_txt
+        burst_txt += "\n"
+    burst_txt += "\n"
+    return burst_txt
+
+
+def _split_packets_into_chunks(current_packets, packet_direction, chunk_size=100):
+    packetss = []
+    packet_directionss = []
+
+    new_packets = scapy.PacketList()
+    new_packet_direction = []
+
+    for packet_index in range(len(current_packets)):
+        new_packets.append(current_packets[packet_index])
+        new_packet_direction.append(packet_direction[packet_index])
+
+        if (packet_index + 1) % chunk_size == 0:
+            packetss.append(new_packets)
+            packet_directionss.append(new_packet_direction)
+            new_packets = scapy.PacketList()
+            new_packet_direction = []
+
+    if len(new_packets) > 0:
+        packetss.append(new_packets)
+        packet_directionss.append(new_packet_direction)
+
+    return packetss, packet_directionss
+
+
+def _build_moe_chunk_text(
+        chunk_packets,
+        chunk_directions,
+        start_index,
+        select_packet_len,
+        no_ether,
+        view="sanitized",
+):
+    burst_txt = ""
+    burst_data_string = ""
+
+    for packet_index in range(len(chunk_packets)):
+        packet_data = chunk_packets[packet_index].copy()
+
+        packet_string = _extract_packet_window(
+            packet_data,
+            chunk_directions[packet_index],
+            start_index,
+            select_packet_len,
+            no_ether,
+        )
+
+        if view == "sanitized":
+            proto_type = _get_proto_type(packet_data, no_ether)
+            packet_string = sanitize_packet_window(packet_string, proto_type)
+        elif view != "raw":
+            raise ValueError(f"Unsupported view: {view}")
+
+        if packet_index == 0:
+            packet_string = "||" + packet_string
+            burst_data_string += packet_string
+        else:
+            if chunk_directions[packet_index] != chunk_directions[packet_index - 1]:
+                burst_txt += _flush_burst_data_string(burst_data_string)
+                burst_data_string = ""
+            burst_data_string += packet_string
+
+        if packet_index == len(chunk_packets) - 1:
+            burst_txt += _flush_burst_data_string(burst_data_string)
+
+    return burst_txt
+
+
+def _load_packets_and_directions_for_moe(label_pcap, is_multi=False):
+    pid = os.getpid() if is_multi else "Main"
 
     try:
         packets = scapy.rdpcap(label_pcap)
     except Scapy_Exception as e:
-        print(f"WARNING: worker {pid if is_multi else 'Main'} failed to read pcap: {label_pcap}. error: {e}",
-              file=sys.stderr)
-        return 0
+        print(
+            f"WARNING: worker {pid} failed to read pcap: {label_pcap}. error: {e}",
+            file=sys.stderr,
+        )
+        return None, None, None
 
     if len(packets) == 0:
-        if is_multi:
-            print(f"WARNING: worker {pid} encountered empty pcap: {label_pcap}", file=sys.stderr)
-        return 0
+        print(
+            f"WARNING: worker {pid} encountered empty pcap: {label_pcap}",
+            file=sys.stderr,
+        )
+        return None, None, None
 
-    no_ether = not hasattr(packets[0], 'type')
+    no_ether = not hasattr(packets[0], "type")
+
+    # 当前 dual-view / moe 流程只处理 IPv4
     if (not no_ether and packets[0].type == 0x86dd) or (no_ether and packets[0].version == 6):
-        return 0
+        return None, None, None
 
     packet_direction = []
     try:
@@ -494,80 +588,105 @@ def get_bursts_moe(label_pcap, select_packet_len, corpora_path, start_index=0, e
             value = feature_result[key]
             packet_direction = [x // abs(x) for x in value.ip_lengths]
     except Exception as e:
-        print(f"ERROR: worker {pid if is_multi else 'Main'} failed to extract flow features: {label_pcap}. error: {e}",
-              file=sys.stderr)
-        return 0
+        print(
+            f"ERROR: worker {pid} failed to extract flow features: {label_pcap}. error: {e}",
+            file=sys.stderr,
+        )
+        return None, None, None
 
     if len(packet_direction) != len(packets):
+        return None, None, None
+
+    return packets, packet_direction, no_ether
+
+
+def _append_text_to_corpus(corpora_path, burst_txt, is_multi=False):
+    if is_multi:
+        pid = os.getpid()
+        out_file = os.path.join(corpora_path, f"{pid}_biburst.txt")
+    else:
+        out_file = corpora_path
+
+    with open(out_file, "a") as f:
+        f.write(burst_txt)
+
+
+def get_bursts_moe(label_pcap, select_packet_len, corpora_path, start_index=0, enhance_factor=1,
+                   is_multi=False):
+    packets, packet_direction, no_ether = _load_packets_and_directions_for_moe(
+        label_pcap, is_multi=is_multi
+    )
+    if packets is None:
         return 0
 
-    burst_txt = ''
+    burst_txt = ""
+
     for en in range(enhance_factor):
         current_packets = packets if en == 0 else enhancement(packets)
-        packetss = []
-        packet_directionss = []
-        new_packet_direction = []
-        new_packets = scapy.PacketList()
-        for packet_index in range(len(current_packets)):
-            new_packets.append(current_packets[packet_index])
-            new_packet_direction.append(packet_direction[packet_index])
-            if (packet_index + 1) % 100 == 0:
-                packetss.append(new_packets)
-                packet_directionss.append(new_packet_direction)
-                new_packets = scapy.PacketList()
-                new_packet_direction = []
-        if len(new_packets) > 0:
-            packetss.append(new_packets)
-            packet_directionss.append(new_packet_direction)
 
-        for pp in range(len(packetss)):
-            chunk_packets = packetss[pp]
-            chunk_directions = packet_directionss[pp]
-            burst_data_string = ''
-            for packet_index in range(len(chunk_packets)):
-                packet_data = chunk_packets[packet_index].copy()
-                packet_string = _extract_packet_window(
-                    packet_data,
-                    chunk_directions[packet_index],
-                    start_index,
-                    select_packet_len,
-                    no_ether,
-                )
+        packetss, packet_directionss = _split_packets_into_chunks(
+            current_packets, packet_direction, chunk_size=100
+        )
 
-                if no_ether:
-                    proto_type = packet_data.proto if hasattr(packet_data, "proto") else -1
-                else:
-                    proto_type = packet_data.payload.proto if packet_data.type == 0x0800 else -1
-                packet_string = sanitize_packet_window(packet_string, proto_type)
+        for chunk_packets, chunk_directions in zip(packetss, packet_directionss):
+            burst_txt += _build_moe_chunk_text(
+                chunk_packets=chunk_packets,
+                chunk_directions=chunk_directions,
+                start_index=start_index,
+                select_packet_len=select_packet_len,
+                no_ether=no_ether,
+                view="sanitized",
+            )
 
-                if packet_index == 0:
-                    packet_string = "||" + packet_string
-                    burst_data_string += packet_string
-                else:
-                    if chunk_directions[packet_index] != chunk_directions[packet_index - 1]:
-                        length = len(burst_data_string)
-                        for string_txt in cut(burst_data_string, int(length / 2)):
-                            burst_txt += string_txt
-                            burst_txt += '\n'
-                        burst_txt += '\n'
-                        burst_data_string = ''
-
-                    burst_data_string += packet_string
-                    if packet_index == len(chunk_packets) - 1:
-                        length = len(burst_data_string)
-                        for string_txt in cut(burst_data_string, int(length / 2)):
-                            burst_txt += string_txt
-                            burst_txt += '\n'
-                        burst_txt += '\n'
-
-    if is_multi:
-        with open(corpora_path + "{}_biburst.txt".format(pid), 'a') as f:
-            f.write(burst_txt)
-    else:
-        with open(corpora_path, 'a') as f:
-            f.write(burst_txt)
+    _append_text_to_corpus(corpora_path, burst_txt, is_multi=is_multi)
     return 0
 
+def get_bursts_moe_pair(
+    label_pcap,
+    select_packet_len,
+    raw_corpora_path,
+    san_corpora_path,
+    start_index=0,
+    enhance_factor=1,
+    is_multi=False,
+):
+    packets, packet_direction, no_ether = _load_packets_and_directions_for_moe(
+        label_pcap, is_multi=is_multi
+    )
+    if packets is None:
+        return 0
+
+    raw_txt = ""
+    san_txt = ""
+
+    for en in range(enhance_factor):
+        current_packets = packets if en == 0 else enhancement(packets)
+
+        packetss, packet_directionss = _split_packets_into_chunks(
+            current_packets, packet_direction, chunk_size=100
+        )
+
+        for chunk_packets, chunk_directions in zip(packetss, packet_directionss):
+            raw_txt += _build_moe_chunk_text(
+                chunk_packets=chunk_packets,
+                chunk_directions=chunk_directions,
+                start_index=start_index,
+                select_packet_len=select_packet_len,
+                no_ether=no_ether,
+                view="raw",
+            )
+            san_txt += _build_moe_chunk_text(
+                chunk_packets=chunk_packets,
+                chunk_directions=chunk_directions,
+                start_index=start_index,
+                select_packet_len=select_packet_len,
+                no_ether=no_ether,
+                view="sanitized",
+            )
+
+    _append_text_to_corpus(raw_corpora_path, raw_txt, is_multi=is_multi)
+    _append_text_to_corpus(san_corpora_path, san_txt, is_multi=is_multi)
+    return 0
 
 def get_consecutive_packets(label_pcap, select_packet_len, corpora_path, start_index=0):
     packets = scapy.rdpcap(label_pcap)  # 读取pcap文件
@@ -617,7 +736,7 @@ def merge(path):  # 合并文件的函数
         pid_set.add(filename.split('_')[0])  # 提取进程ID并添加到集合
     with open(path[:-1] + "_biburst.txt", 'w') as fw1:  # 打开合并后的输出文件
         # with open(path[:-1]+"_extra.txt",'w') as fw2:  # 注释掉的代码：打开合并后的额外信息文件
-        for key in pid_set:  # 遍历进程ID集合
+        for key in sorted(pid_set, key=lambda x: int(x) if str(x).isdigit() else str(x)):  # 遍历进程ID集合
             with open(path + key + "_biburst.txt", 'r') as fr:  # 打开进程特定文件
                 while True:  # 无限循环
                     line = fr.readline()  # 读取一行
@@ -696,6 +815,8 @@ def pretrain_dataset_generation(pcapng_path, pcap_output_path, output_split_path
                            start_index=start_index, enhance_factor=enhance_factor)
 
     return 0
+
+
 """   print("Begin to generate burst dataset.")  # 打印开始生成突发数据集信息
     if is_multi:  # 如果是多进程模式
         all_files = []  # 初始化所有文件列表
@@ -731,6 +852,7 @@ def pretrain_dataset_generation(pcapng_path, pcap_output_path, output_split_path
 
     return 0  # 返回成功代码
 """
+
 
 # 把突发序列转化为可直接用于语言模型的“语料（corpora）”文件
 def corpora_to_bigram(corpora_path, corpora_bigram_path):  # 语料库转换为bigram的函数
