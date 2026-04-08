@@ -6,7 +6,9 @@ import torch.nn.functional as F
 class ProtocolRouter(nn.Module):
     def __init__(self, num_experts, hidden_size, noise_std=0.01,
                  balance_weight=0.2, entropy_weight=1.0, target_entropy=0.6,
-                 rank1_weight=0.0, rank2_weight=0.0, rank_target_entropy=0.45):
+                 rank1_weight=0.0, rank2_weight=0.0, rank_target_entropy=0.45,
+                 specialization_weight=1.0, margin_weight=1.0,
+                 target_margin=0.20, decorrelation_weight=0.5):
         super(ProtocolRouter, self).__init__()
         self.num_experts = num_experts
         self.noise_std = noise_std
@@ -16,6 +18,10 @@ class ProtocolRouter(nn.Module):
         self.rank1_weight = rank1_weight
         self.rank2_weight = rank2_weight
         self.rank_target_entropy = rank_target_entropy
+        self.specialization_weight = specialization_weight
+        self.margin_weight = margin_weight
+        self.target_margin = target_margin
+        self.decorrelation_weight = decorrelation_weight
         # 1. 门控层 (Gating Network) - 对应 Formula 5
         # 用于将输入特征映射到专家权重
         self.gate = nn.Linear(hidden_size, num_experts)
@@ -48,6 +54,25 @@ class ProtocolRouter(nn.Module):
         uniform_balance = self.num_experts * (rank_prob * rank_fraction).sum()
         entropy_target_loss = (self._normalized_entropy(rank_prob) - self.rank_target_entropy) ** 2
         return self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
+
+    def _specialization_regularizer(self, router_probs):
+        margin_loss = router_probs.new_zeros(())
+        if self.num_experts > 1:
+            top2_probs = torch.topk(router_probs, k=2, dim=-1).values
+            routing_margin = top2_probs[:, 0] - top2_probs[:, 1]
+            margin_loss = F.relu(self.target_margin - routing_margin).mean()
+
+        decorrelation_loss = router_probs.new_zeros(())
+        if router_probs.size(0) > 1 and self.num_experts > 1:
+            centered = router_probs - router_probs.mean(dim=0, keepdim=True)
+            covariance = centered.transpose(0, 1) @ centered / max(router_probs.size(0), 1)
+            off_diagonal = covariance - torch.diag_embed(torch.diagonal(covariance))
+            decorrelation_loss = off_diagonal.pow(2).mean()
+
+        return self.specialization_weight * (
+            self.margin_weight * margin_loss +
+            self.decorrelation_weight * decorrelation_loss
+        )
 
     def forward(self, proto_ids=None, inputs_embeds=None, top_k=1):
         """
@@ -143,7 +168,13 @@ class ProtocolRouter(nn.Module):
 
         entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
 
-        load_balance_loss = self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
+        specialization_loss = self._specialization_regularizer(router_probs)
+
+        load_balance_loss = (
+            specialization_loss +
+            self.balance_weight * uniform_balance +
+            self.entropy_weight * entropy_target_loss
+        )
 
         if top_k == 1:
             if self.rank1_weight > 0:

@@ -53,6 +53,14 @@ def model_opts(parser):
                         help="Extra anti-collapse weight for rank-2 routing when top-k > 1. Default 0 disables it.")
     parser.add_argument("--macro_router_rank_target_entropy", type=float, default=0.45,
                         help="Target normalized entropy for rank-specific anti-collapse losses.")
+    parser.add_argument("--macro_router_specialization_weight", type=float, default=1.0,
+                        help="Weight of semantic specialization term inside Macro MoE router loss.")
+    parser.add_argument("--macro_router_margin_weight", type=float, default=1.0,
+                        help="Weight of sample-wise top-k routing margin term.")
+    parser.add_argument("--macro_router_target_margin", type=float, default=0.20,
+                        help="Target gap between top-1 and top-2 routing probabilities.")
+    parser.add_argument("--macro_router_decorrelation_weight", type=float, default=0.5,
+                        help="Weight of batch-wise expert decorrelation term.")
     parser.add_argument("--macro_load_balance", type=float, default=0.1,
                         help="Global weight of the gate loss in total loss (replacing moebert_load_balance).")
     parser.add_argument("--macro_top_k", type=int, default=1,

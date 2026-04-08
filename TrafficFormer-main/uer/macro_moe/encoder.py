@@ -46,6 +46,10 @@ class MacroMoEEncoder(nn.Module):
             rank1_weight=getattr(args, "macro_router_rank1_weight", 0.0),
             rank2_weight=getattr(args, "macro_router_rank2_weight", 0.0),
             rank_target_entropy=getattr(args, "macro_router_rank_target_entropy", 0.45),
+            specialization_weight=getattr(args, "macro_router_specialization_weight", 1.0),
+            margin_weight=getattr(args, "macro_router_margin_weight", 1.0),
+            target_margin=getattr(args, "macro_router_target_margin", 0.20),
+            decorrelation_weight=getattr(args, "macro_router_decorrelation_weight", 0.5),
         )
 
     def set_adaptation_mode(self, mode=True):
