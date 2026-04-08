@@ -12,15 +12,15 @@ MODE = "single_sanitized"   # "single_sanitized" or "dual_view"
 
 
 def main():
-    raw_pcap_dir = "data/pretrain/raw_pcapng/"
-    converted_pcap_dir = "data/pretrain_moe/converted_pcap/"
-    split_flow_dir = "data/pretrain_moe/split_flows/"
+    raw_pcap_dir = "data_generation/data/pretrain_moe/raw_pcapng/"
+    converted_pcap_dir = "data_generation/data/pretrain_moe/converted_pcap/"
+    split_flow_dir = "data_generation/data/pretrain_moe/split_flows/"
 
     if MODE == "single_sanitized":
-        corpus_temp_dir = "data/pretrain_moe/corpus_temp/"
-        merged_corpus_file = "data/pretrain_moe/corpus_temp_biburst.txt"
-        bigram_file = "data/pretrain_moe/corpus_moe_bigram.txt"
-        vocab_file = "../models/encryptd_vocab_moe.txt"
+        corpus_temp_dir = "data_generation/data/pretrain_moe/corpus_temp/"
+        merged_corpus_file = "data_generation/data/pretrain_moe/corpus_temp_biburst.txt"
+        bigram_file = "data_generation/data/pretrain_moe/corpus_moe_bigram.txt"
+        vocab_file = "models/encryptd_vocab_moe.txt"
 
         print(f"Step 1/3: generate MoE corpus into {corpus_temp_dir}")
         pretrain_dataset_generation_moe(
@@ -60,12 +60,12 @@ def main():
         return
 
     # dual_view
-    corpus_temp_dir = "data/pretrain_moe/corpus_temp_dual/"
-    merged_raw_corpus_file = "data/pretrain_moe/corpus_temp_dual_raw_biburst.txt"
-    merged_san_corpus_file = "data/pretrain_moe/corpus_temp_dual_san_biburst.txt"
-    raw_bigram_file = "data/pretrain_moe/corpus_raw_bigram.txt"
-    san_bigram_file = "data/pretrain_moe/corpus_sanitized_bigram.txt"
-    vocab_file = "../models/encryptd_vocab_moe.txt"
+    corpus_temp_dir = "data_generation/data/pretrain_moe/corpus_temp_dual/"
+    merged_raw_corpus_file = "data_generation/data/pretrain_moe/corpus_temp_dual_raw_biburst.txt"
+    merged_san_corpus_file = "data_generation/data/pretrain_moe/corpus_temp_dual_san_biburst.txt"
+    raw_bigram_file = "data_generation/data/pretrain_moe/corpus_raw_bigram.txt"
+    san_bigram_file = "data_generation/data/pretrain_moe/corpus_sanitized_bigram.txt"
+    vocab_file = "models/encryptd_vocab_moe.txt"
 
     print(f"Step 1/3: generate dual-view MoE corpus into {corpus_temp_dir}")
     pretrain_dataset_generation_moe(
@@ -121,12 +121,12 @@ def main():
 
 
 if __name__ == "__main__":
-    os.makedirs("data/pretrain_moe/raw_pcapng", exist_ok=True)
-    os.makedirs("data/pretrain_moe/converted_pcap", exist_ok=True)
-    os.makedirs("data/pretrain_moe/split_flows", exist_ok=True)
+    os.makedirs("data_generation/data/pretrain_moe/raw_pcapng", exist_ok=True)
+    os.makedirs("data_generation/data/pretrain_moe/converted_pcap", exist_ok=True)
+    os.makedirs("data_generation/data/pretrain_moe/split_flows", exist_ok=True)
 
     print("MoE-specific pretrain data pipeline")
-    print("Put your pcap/pcapng files into: data/pretrain_moe/raw_pcapng/")
+    print("Put your pcap/pcapng files into: data_generation/data/pretrain_moe/raw_pcapng/")
     print(f"Current MODE = {MODE}")
 
     response = input("Run MoE corpus generation now? (y/n): ")

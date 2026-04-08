@@ -439,6 +439,43 @@ def _extract_packet_window(packet_data, packet_direction, start_index, select_pa
     return data[start_index:end_index]
 
 
+# ---------------- field groups for MoE-friendly pretrain ----------------
+FIELD_GROUPS = {
+    "IDENTITY_FIELDS": {
+        "ipv4": [
+            ("IPID", 4, 2),
+            ("src_ip", 12, 4),
+            ("dst_ip", 16, 4),
+        ],
+        "tcp": [
+            ("src_port", 20, 2),
+            ("dst_port", 22, 2),
+            ("seq", 24, 4),
+            ("ack", 28, 4),
+        ],
+        "udp": [
+            ("src_port", 20, 2),
+            ("dst_port", 22, 2),
+        ],
+    },
+    "MECHANISM_FIELDS": [
+        "burst_boundary",
+        "packet_order",
+        "direction_change_pattern",
+        "payload_prefix",
+        "tcp_flags",
+        "protocol_trace",
+    ],
+    "ABLATION_FIELDS": [
+        "ttl",
+        "header_checksum",
+        "window_size",
+        "hdrlen",
+        "frag_offset",
+    ],
+}
+
+
 def _overwrite_hex_field(packet_string, byte_offset, byte_length, fill_hex="00"):
     start = byte_offset * 2
     end = start + byte_length * 2
@@ -456,18 +493,20 @@ def sanitize_packet_window(packet_string, proto_type):
         return packet_string
 
     sanitized = packet_string
-    for byte_offset, byte_length in ((4, 2), (12, 4), (16, 4)):
+
+    # IPv4 identity fields
+    for _field_name, byte_offset, byte_length in FIELD_GROUPS["IDENTITY_FIELDS"]["ipv4"]:
         sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
 
+    # TCP / UDP identity fields
     if proto_type == 6:
-        for byte_offset, byte_length in ((20, 2), (22, 2), (24, 4), (28, 4)):
+        for _field_name, byte_offset, byte_length in FIELD_GROUPS["IDENTITY_FIELDS"]["tcp"]:
             sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
     elif proto_type == 17:
-        for byte_offset, byte_length in ((20, 2), (22, 2)):
+        for _field_name, byte_offset, byte_length in FIELD_GROUPS["IDENTITY_FIELDS"]["udp"]:
             sanitized = _overwrite_hex_field(sanitized, byte_offset, byte_length)
 
     return sanitized
-
 
 def _get_proto_type(packet_data, no_ether):
     if no_ether:
@@ -639,6 +678,166 @@ def get_bursts_moe(label_pcap, select_packet_len, corpora_path, start_index=0, e
             )
 
     _append_text_to_corpus(corpora_path, burst_txt, is_multi=is_multi)
+    return 0
+
+def _get_proto_type(packet_data, no_ether):
+    if no_ether:
+        return packet_data.proto if hasattr(packet_data, "proto") else -1
+    if getattr(packet_data, "type", None) == 0x0800 and hasattr(packet_data, "payload"):
+        return packet_data.payload.proto if hasattr(packet_data.payload, "proto") else -1
+    return -1
+
+
+def _flush_burst_data_string(burst_data_string):
+    if not burst_data_string:
+        return ""
+    burst_txt = ""
+    length = len(burst_data_string)
+    for string_txt in cut(burst_data_string, int(length / 2)):
+        burst_txt += string_txt
+        burst_txt += "\n"
+    burst_txt += "\n"
+    return burst_txt
+
+
+def _append_text_to_corpus(corpora_path, burst_txt, is_multi=False):
+    if is_multi:
+        pid = os.getpid()
+        out_file = os.path.join(corpora_path, f"{pid}_biburst.txt")
+    else:
+        out_file = corpora_path
+
+    with open(out_file, "a") as f:
+        f.write(burst_txt)
+
+
+def _load_packets_and_directions_for_dualview(label_pcap, is_multi=False):
+    pid = os.getpid() if is_multi else "Main"
+
+    try:
+        packets = scapy.rdpcap(label_pcap)
+    except Scapy_Exception as e:
+        print(
+            f"WARNING: worker {pid} failed to read pcap: {label_pcap}. error: {e}",
+            file=sys.stderr,
+        )
+        return None, None, None
+
+    if len(packets) == 0:
+        print(
+            f"WARNING: worker {pid} encountered empty pcap: {label_pcap}",
+            file=sys.stderr,
+        )
+        return None, None, None
+
+    no_ether = not hasattr(packets[0], "type")
+
+    # 当前 dual-view / moe 流程仍然只处理 IPv4
+    if (not no_ether and packets[0].type == 0x86dd) or (no_ether and packets[0].version == 6):
+        return None, None, None
+
+    packet_direction = []
+    try:
+        feature_result = extract(label_pcap)
+        for key in feature_result.keys():
+            value = feature_result[key]
+            packet_direction = [x // abs(x) for x in value.ip_lengths]
+    except Exception as e:
+        print(
+            f"ERROR: worker {pid} failed to extract flow features: {label_pcap}. error: {e}",
+            file=sys.stderr,
+        )
+        return None, None, None
+
+    if len(packet_direction) != len(packets):
+        return None, None, None
+
+    return packets, packet_direction, no_ether
+
+
+def get_bursts_dualview(
+    label_pcap,
+    select_packet_len,
+    raw_corpora_path,
+    sanitized_corpora_path,
+    start_index=0,
+    enhance_factor=1,
+    is_multi=False,
+):
+    packets, packet_direction, no_ether = _load_packets_and_directions_for_dualview(
+        label_pcap, is_multi=is_multi
+    )
+    if packets is None:
+        return 0
+
+    raw_txt = ""
+    san_txt = ""
+
+    for en in range(enhance_factor):
+        current_packets = packets if en == 0 else enhancement(packets)
+
+        packetss = []
+        packet_directionss = []
+
+        new_packets = scapy.PacketList()
+        new_packet_direction = []
+
+        for packet_index in range(len(current_packets)):
+            new_packets.append(current_packets[packet_index])
+            new_packet_direction.append(packet_direction[packet_index])
+
+            if (packet_index + 1) % 100 == 0:
+                packetss.append(new_packets)
+                packet_directionss.append(new_packet_direction)
+                new_packets = scapy.PacketList()
+                new_packet_direction = []
+
+        if len(new_packets) > 0:
+            packetss.append(new_packets)
+            packet_directionss.append(new_packet_direction)
+
+        for pp in range(len(packetss)):
+            chunk_packets = packetss[pp]
+            chunk_directions = packet_directionss[pp]
+
+            raw_burst_data_string = ""
+            san_burst_data_string = ""
+
+            for packet_index in range(len(chunk_packets)):
+                packet_data = chunk_packets[packet_index].copy()
+
+                raw_packet_string = _extract_packet_window(
+                    packet_data,
+                    chunk_directions[packet_index],
+                    start_index,
+                    select_packet_len,
+                    no_ether,
+                )
+
+                proto_type = _get_proto_type(packet_data, no_ether)
+                san_packet_string = sanitize_packet_window(raw_packet_string, proto_type)
+
+                if packet_index == 0:
+                    raw_packet_string = "||" + raw_packet_string
+                    san_packet_string = "||" + san_packet_string
+                    raw_burst_data_string += raw_packet_string
+                    san_burst_data_string += san_packet_string
+                else:
+                    if chunk_directions[packet_index] != chunk_directions[packet_index - 1]:
+                        raw_txt += _flush_burst_data_string(raw_burst_data_string)
+                        san_txt += _flush_burst_data_string(san_burst_data_string)
+                        raw_burst_data_string = ""
+                        san_burst_data_string = ""
+
+                    raw_burst_data_string += raw_packet_string
+                    san_burst_data_string += san_packet_string
+
+                if packet_index == len(chunk_packets) - 1:
+                    raw_txt += _flush_burst_data_string(raw_burst_data_string)
+                    san_txt += _flush_burst_data_string(san_burst_data_string)
+
+    _append_text_to_corpus(raw_corpora_path, raw_txt, is_multi=is_multi)
+    _append_text_to_corpus(sanitized_corpora_path, san_txt, is_multi=is_multi)
     return 0
 
 def get_bursts_moe_pair(
