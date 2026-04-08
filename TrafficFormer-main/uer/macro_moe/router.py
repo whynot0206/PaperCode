@@ -32,10 +32,14 @@ class ProtocolRouter(nn.Module):
         # rank_usage_counter[r, e] = 第 r+1 路选择 expert e 的次数
         # 形状固定为 [num_experts, num_experts]，实际只使用前 top_k 行。
         self.register_buffer("rank_usage_counter", torch.zeros(num_experts, num_experts, dtype=torch.long))
+        self.latest_loss_terms = {}
 
     def reset_usage(self):
         self.usage_counter.zero_()
         self.rank_usage_counter.zero_()
+
+    def reset_loss_terms(self):
+        self.latest_loss_terms = {}
 
     def _normalized_entropy(self, prob):
         prob = prob / (prob.sum() + 1e-9)
@@ -168,28 +172,58 @@ class ProtocolRouter(nn.Module):
 
         entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
 
-        specialization_loss = self._specialization_regularizer(router_probs)
+        margin_component = router_probs.new_zeros(())
+        decorrelation_component = router_probs.new_zeros(())
+        if self.num_experts > 1:
+            top2_probs = torch.topk(router_probs, k=2, dim=-1).values
+            routing_margin = top2_probs[:, 0] - top2_probs[:, 1]
+            margin_component = self.specialization_weight * self.margin_weight * F.relu(
+                self.target_margin - routing_margin
+            ).mean()
+
+        if router_probs.size(0) > 1 and self.num_experts > 1:
+            centered = router_probs - router_probs.mean(dim=0, keepdim=True)
+            covariance = centered.transpose(0, 1) @ centered / max(router_probs.size(0), 1)
+            off_diagonal = covariance - torch.diag_embed(torch.diagonal(covariance))
+            decorrelation_component = self.specialization_weight * self.decorrelation_weight * off_diagonal.pow(2).mean()
+
+        specialization_loss = margin_component + decorrelation_component
+        balance_component = self.balance_weight * uniform_balance
+        entropy_component = self.entropy_weight * entropy_target_loss
 
         load_balance_loss = (
             specialization_loss +
-            self.balance_weight * uniform_balance +
-            self.entropy_weight * entropy_target_loss
+            balance_component +
+            entropy_component
         )
+
+        rank_component = router_probs.new_zeros(())
 
         if top_k == 1:
             if self.rank1_weight > 0:
-                load_balance_loss = load_balance_loss + self.rank1_weight * self._rank_regularizer(
+                rank_component = rank_component + self.rank1_weight * self._rank_regularizer(
                     expert_indices, router_probs
                 )
         else:
             if self.rank1_weight > 0:
-                load_balance_loss = load_balance_loss + self.rank1_weight * self._rank_regularizer(
+                rank_component = rank_component + self.rank1_weight * self._rank_regularizer(
                     expert_indices[:, 0], router_probs
                 )
             if self.rank2_weight > 0:
-                load_balance_loss = load_balance_loss + self.rank2_weight * self._rank_regularizer(
+                rank_component = rank_component + self.rank2_weight * self._rank_regularizer(
                     expert_indices[:, 1], router_probs
                 )
+
+        load_balance_loss = load_balance_loss + rank_component
+        self.latest_loss_terms = {
+            "router_total": load_balance_loss.detach(),
+            "router_specialization": specialization_loss.detach(),
+            "router_margin": margin_component.detach(),
+            "router_decorrelation": decorrelation_component.detach(),
+            "router_balance": balance_component.detach(),
+            "router_entropy": entropy_component.detach(),
+            "router_rank": rank_component.detach(),
+        }
 
         # ================= 统计更新 =================
         with torch.no_grad():

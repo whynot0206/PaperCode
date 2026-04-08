@@ -88,6 +88,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
                 loss = loss_fct(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
 
             if self.macro_use_route_label and route_tgt is not None and router_logits is not None:
+                route_tgt = route_tgt.to(router_logits.device)
                 route_loss = nn.CrossEntropyLoss()(router_logits, route_tgt.view(-1))
                 loss = loss + self.macro_route_loss_weight * route_loss
 

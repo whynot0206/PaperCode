@@ -244,6 +244,12 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         self.total_correct_mlm = 0.0  # 初始化MLM任务总正确预测数
         self.total_denominator = 0.0  # 初始化MLM任务总分母数
         self.total_gate_loss = 0.0
+        self.total_router_specialization = 0.0
+        self.total_router_margin = 0.0
+        self.total_router_decorrelation = 0.0
+        self.total_router_balance = 0.0
+        self.total_router_entropy = 0.0
+        self.total_router_rank = 0.0
         self.load_balance_alpha = getattr(args, "macro_load_balance", 0.1)
         self.is_moe = getattr(args, "is_moe", False)  # 确保 is_moe 属性存在
         self.is_macro_moe = (args.encoder == "macro_moe")  # 添加 macro_moe 标志
@@ -293,6 +299,18 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         self.total_denominator += denominator.item()
         self.total_instances += src.size(0)
 
+        raw_model = model.module if hasattr(model, "module") else model
+        router_terms = {}
+        if hasattr(raw_model, "encoder") and hasattr(raw_model.encoder, "router"):
+            router_terms = getattr(raw_model.encoder.router, "latest_loss_terms", {}) or {}
+
+        self.total_router_specialization += float(router_terms.get("router_specialization", 0.0))
+        self.total_router_margin += float(router_terms.get("router_margin", 0.0))
+        self.total_router_decorrelation += float(router_terms.get("router_decorrelation", 0.0))
+        self.total_router_balance += float(router_terms.get("router_balance", 0.0))
+        self.total_router_entropy += float(router_terms.get("router_entropy", 0.0))
+        self.total_router_rank += float(router_terms.get("router_rank", 0.0))
+
         loss = loss / self.accumulation_steps
         return loss
 
@@ -305,7 +323,13 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
               "| {:3.3f} s"
               "| {:8.2f} tokens/s"
               "| loss {:7.2f}"
-              "| gate_loss: {:3.3f}"  # 打印位置正确
+              "| gate_loss: {:3.3f}"
+              "| router_spec: {:3.3f}"
+              "| margin: {:3.3f}"
+              "| decor: {:3.3f}"
+              "| balance: {:3.3f}"
+              "| entropy: {:3.3f}"
+              "| rank: {:3.3f}"
               "| loss_mlm: {:3.3f}"
               "| loss_sp: {:3.3f}"
               "| acc_mlm: {:3.3f}"
@@ -315,7 +339,13 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
             (time.time() - self.start_time),
             done_tokens / (time.time() - self.start_time),
             self.total_loss / self.report_steps,
-            self.total_gate_loss / self.report_steps,  # 计算逻辑正确
+            self.total_gate_loss / self.report_steps,
+            self.total_router_specialization / self.report_steps,
+            self.total_router_margin / self.report_steps,
+            self.total_router_decorrelation / self.report_steps,
+            self.total_router_balance / self.report_steps,
+            self.total_router_entropy / self.report_steps,
+            self.total_router_rank / self.report_steps,
             self.total_loss_mlm / self.report_steps,
             self.total_loss_sp / self.report_steps,
             self.total_correct_mlm / self.total_denominator,
@@ -323,6 +353,12 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
 
         # [Fix 3] 必须重置 total_gate_loss
         self.total_loss, self.total_loss_mlm, self.total_loss_sp, self.total_gate_loss = 0.0, 0.0, 0.0, 0.0
+        self.total_router_specialization = 0.0
+        self.total_router_margin = 0.0
+        self.total_router_decorrelation = 0.0
+        self.total_router_balance = 0.0
+        self.total_router_entropy = 0.0
+        self.total_router_rank = 0.0
         self.total_correct_mlm, self.total_denominator = 0.0, 0.0
         self.total_correct_sp, self.total_instances = 0.0, 0.0
 
