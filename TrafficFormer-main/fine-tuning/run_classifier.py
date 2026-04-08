@@ -38,6 +38,8 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         self.soft_targets = args.soft_targets  # 设置是否使用软目标
         self.soft_alpha = args.soft_alpha  # 设置软目标权重
         self.macro_load_balance = getattr(args, "macro_load_balance", 0.1)
+        self.macro_route_loss_weight = getattr(args, "macro_route_loss_weight", 0.3)
+        self.macro_use_route_label = getattr(args, "macro_use_route_label", False)
         self.class_weights = None  # 可选：按训练集标签频率自动计算的类别权重
         self.output_layer_1 = nn.Linear(args.hidden_size, args.hidden_size)  # 创建第一个输出层
         self.output_layer_2 = nn.Linear(args.hidden_size, self.labels_num)  # 创建第二个输出层（分类层）
@@ -45,7 +47,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
     def set_class_weights(self, class_weights):
         self.class_weights = class_weights
 
-    def forward(self, src, tgt, seg, soft_tgt=None):  # 前向传播函数
+    def forward(self, src, tgt, seg, soft_tgt=None, route_tgt=None):  # 前向传播函数
         """
         Args:
             src: [batch_size x seq_length]  # 输入序列
@@ -57,7 +59,7 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
         # Encoder.
         if hasattr(self, "encoder") and type(self.encoder).__name__ == "MacroMoEEncoder":
             # 接收多出来的 expert_indices
-            output, gate_loss, expert_indices = self.encoder(emb, seg)
+            output, gate_loss, expert_indices, router_logits, router_probs = self.encoder(emb, seg)
         else:
             output = self.encoder(emb, seg)
             gate_loss = 0.0
@@ -84,6 +86,10 @@ class Classifier(nn.Module):  # 定义分类器类，继承自nn.Module
                                                         tgt.view(-1))  # 计算混合损失（MSE + NLL）
             else:  # 如果不使用软目标
                 loss = loss_fct(nn.LogSoftmax(dim=-1)(logits), tgt.view(-1))  # 计算负对数似然损失
+
+            if self.macro_use_route_label and route_tgt is not None and router_logits is not None:
+                route_loss = nn.CrossEntropyLoss()(router_logits, route_tgt.view(-1))
+                loss = loss + self.macro_route_loss_weight * route_loss
 
             if isinstance(self.encoder, MacroMoEEncoder) and isinstance(gate_loss, torch.Tensor):
                 loss = loss + self.macro_load_balance * gate_loss
@@ -158,148 +164,150 @@ def build_optimizer(args, model):  # 构建优化器的函数
     return optimizer, scheduler  # 返回优化器和调度器
 
 
-def batch_loader(batch_size, src, tgt, seg, soft_tgt=None):  # 批量数据加载器函数
-    instances_num = src.size()[0]  # 获取实例数量
-    for i in range(instances_num // batch_size):  # 遍历完整批次
-        src_batch = src[i * batch_size: (i + 1) * batch_size, :]  # 获取源数据批次
-        tgt_batch = tgt[i * batch_size: (i + 1) * batch_size]  # 获取目标数据批次
-        seg_batch = seg[i * batch_size: (i + 1) * batch_size, :]  # 获取分段标识批次
-        if soft_tgt is not None:  # 如果有软目标
-            soft_tgt_batch = soft_tgt[i * batch_size: (i + 1) * batch_size, :]  # 获取软目标批次
-            yield src_batch, tgt_batch, seg_batch, soft_tgt_batch  # 返回批次数据（含软目标）
-        else:  # 如果没有软目标
-            yield src_batch, tgt_batch, seg_batch, None  # 返回批次数据（不含软目标）
-    if instances_num > instances_num // batch_size * batch_size:  # 如果有剩余数据
-        src_batch = src[instances_num // batch_size * batch_size:, :]  # 获取剩余源数据
-        tgt_batch = tgt[instances_num // batch_size * batch_size:]  # 获取剩余目标数据
-        seg_batch = seg[instances_num // batch_size * batch_size:, :]  # 获取剩余分段标识
-        if soft_tgt is not None:  # 如果有软目标
-            soft_tgt_batch = soft_tgt[instances_num // batch_size * batch_size:, :]  # 获取剩余软目标
-            yield src_batch, tgt_batch, seg_batch, soft_tgt_batch  # 返回剩余批次数据（含软目标）
-        else:  # 如果没有软目标
-            yield src_batch, tgt_batch, seg_batch, None  # 返回剩余批次数据（不含软目标）
+def batch_loader(batch_size, src, tgt, seg, soft_tgt=None, route_tgt=None):
+    instances_num = src.size()[0]
+    for i in range(instances_num // batch_size):
+        src_batch = src[i * batch_size: (i + 1) * batch_size, :]
+        tgt_batch = tgt[i * batch_size: (i + 1) * batch_size]
+        seg_batch = seg[i * batch_size: (i + 1) * batch_size, :]
+        route_tgt_batch = route_tgt[i * batch_size: (i + 1) * batch_size] if route_tgt is not None else None
+        if soft_tgt is not None:
+            soft_tgt_batch = soft_tgt[i * batch_size: (i + 1) * batch_size, :]
+            yield src_batch, tgt_batch, seg_batch, soft_tgt_batch, route_tgt_batch
+        else:
+            yield src_batch, tgt_batch, seg_batch, None, route_tgt_batch
+
+    if instances_num > instances_num // batch_size * batch_size:
+        src_batch = src[instances_num // batch_size * batch_size:, :]
+        tgt_batch = tgt[instances_num // batch_size * batch_size:]
+        seg_batch = seg[instances_num // batch_size * batch_size:, :]
+        route_tgt_batch = route_tgt[instances_num // batch_size * batch_size:] if route_tgt is not None else None
+        if soft_tgt is not None:
+            soft_tgt_batch = soft_tgt[instances_num // batch_size * batch_size:, :]
+            yield src_batch, tgt_batch, seg_batch, soft_tgt_batch, route_tgt_batch
+        else:
+            yield src_batch, tgt_batch, seg_batch, None, route_tgt_batch
 
 
-def read_dataset(args, path):  # 读取数据集的函数
-    dataset, columns = [], {}  # 初始化数据集和列字典
-    with open(path, mode="r", encoding="utf-8") as f:  # 打开文件
-        for line_id, line in enumerate(f):  # 遍历文件行
-            if line_id == 0:  # 如果是第一行（表头）
-                for i, column_name in enumerate(line.strip().split("\t")):  # 遍历列名
-                    columns[column_name] = i  # 记录列索引
-                continue  # 继续下一行
-            line = line[:-1].split("\t")  # 分割行数据（去除换行符）
-            tgt = int(line[columns["label"]])  # 获取标签
-            if args.soft_targets and "logits" in columns.keys():  # 如果使用软目标且数据中有logits列
-                soft_tgt = [float(value) for value in line[columns["logits"]].split(" ")]  # 获取软目标
-            if "text_b" not in columns:  # 如果没有text_b列（单句分类）
-                text_a = line[columns["text_a"]]  # 获取文本a
-                src = args.tokenizer.convert_tokens_to_ids(
-                    [CLS_TOKEN] + args.tokenizer.tokenize(text_a))  # 将文本转换为ID序列（添加[CLS]）
-                seg = [1] * len(src)  # 创建分段标识（全为1）
-            else:  # 如果有text_b列（句对分类）
-                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]  # 获取文本a和文本b
-                src_a = args.tokenizer.convert_tokens_to_ids(
-                    [CLS_TOKEN] + args.tokenizer.tokenize(text_a) + [SEP_TOKEN])  # 将文本a转换为ID序列
-                src_b = args.tokenizer.convert_tokens_to_ids(
-                    args.tokenizer.tokenize(text_b) + [SEP_TOKEN])  # 将文本b转换为ID序列
-                src = src_a + src_b  # 拼接两个序列
-                seg = [1] * len(src_a) + [2] * len(src_b)  # 创建分段标识（文本a为1，文本b为2）
+def read_dataset(args, path):
+    dataset, columns = [], {}
+    with open(path, mode="r", encoding="utf-8") as f:
+        for line_id, line in enumerate(f):
+            if line_id == 0:
+                for i, column_name in enumerate(line.strip().split("	")):
+                    columns[column_name] = i
+                continue
+            line = line.rstrip("\n").split("\t")
+            tgt = int(line[columns["label"]])
+            route_tgt = None
+            if getattr(args, "macro_use_route_label", False) and "route_label" in columns:
+                route_tgt = int(line[columns["route_label"]])
+            if args.soft_targets and "logits" in columns.keys():
+                soft_tgt = [float(value) for value in line[columns["logits"]].split(" ")]
+            if "text_b" not in columns:
+                text_a = line[columns["text_a"]]
+                src = args.tokenizer.convert_tokens_to_ids([CLS_TOKEN] + args.tokenizer.tokenize(text_a))
+                seg = [1] * len(src)
+            else:
+                text_a, text_b = line[columns["text_a"]], line[columns["text_b"]]
+                src_a = args.tokenizer.convert_tokens_to_ids([CLS_TOKEN] + args.tokenizer.tokenize(text_a) + [SEP_TOKEN])
+                src_b = args.tokenizer.convert_tokens_to_ids(args.tokenizer.tokenize(text_b) + [SEP_TOKEN])
+                src = src_a + src_b
+                seg = [1] * len(src_a) + [2] * len(src_b)
 
-            if len(src) > args.seq_length:  # 如果序列长度超过最大长度
-                src = src[: args.seq_length]  # 截断序列
-                seg = seg[: args.seq_length]  # 截断分段标识
-            while len(src) < args.seq_length:  # 如果序列长度小于最大长度
-                src.append(0)  # 填充0
-                seg.append(0)  # 填充0
-            if args.soft_targets and "logits" in columns.keys():  # 如果使用软目标且数据中有logits列
-                dataset.append((src, tgt, seg, soft_tgt))  # 添加数据（含软目标）
-            else:  # 如果不使用软目标或数据中没有logits列
-                dataset.append((src, tgt, seg))  # 添加数据（不含软目标）
+            if len(src) > args.seq_length:
+                src = src[: args.seq_length]
+                seg = seg[: args.seq_length]
+            while len(src) < args.seq_length:
+                src.append(0)
+                seg.append(0)
+            if args.soft_targets and "logits" in columns.keys():
+                dataset.append((src, tgt, seg, soft_tgt, route_tgt))
+            else:
+                dataset.append((src, tgt, seg, route_tgt))
 
-    return dataset  # 返回数据集
-
-
-def train_model(args, model, optimizer, scheduler, src_batch, tgt_batch, seg_batch, soft_tgt_batch=None):  # 训练模型的函数
-    model.zero_grad()  # 清除梯度
-
-    src_batch = src_batch.to(args.device)  # 将源数据移动到设备
-    tgt_batch = tgt_batch.to(args.device)  # 将目标数据移动到设备
-    seg_batch = seg_batch.to(args.device)  # 将分段标识移动到设备
-    if soft_tgt_batch is not None:  # 如果有软目标批次
-        soft_tgt_batch = soft_tgt_batch.to(args.device)  # 将软目标移动到设备
-
-    loss, _, _ = model(src_batch, tgt_batch, seg_batch, soft_tgt_batch)  # 前向传播计算损失
-    if torch.cuda.device_count() > 1:  # 如果使用多个GPU
-        loss = torch.mean(loss)  # 对损失求均值（多GPU情况）
-
-    if args.fp16:  # 如果使用混合精度训练
-        with args.amp.scale_loss(loss, optimizer) as scaled_loss:  # 缩放损失
-            scaled_loss.backward()  # 反向传播
-    else:  # 如果不使用混合精度训练
-        loss.backward()  # 反向传播
-
-    optimizer.step()  # 更新参数
-    scheduler.step()  # 更新学习率
-
-    return loss  # 返回损失值
+    return dataset
 
 
-def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函数
-    src = torch.LongTensor([sample[0] for sample in dataset])  # 创建源数据张量
-    tgt = torch.LongTensor([sample[1] for sample in dataset])  # 创建目标数据张量
-    seg = torch.LongTensor([sample[2] for sample in dataset])  # 创建分段标识张量
+def train_model(args, model, optimizer, scheduler, src_batch, tgt_batch, seg_batch, soft_tgt_batch=None, route_tgt_batch=None):
+    model.zero_grad()
 
-    batch_size = args.batch_size  # 获取批次大小
+    src_batch = src_batch.to(args.device)
+    tgt_batch = tgt_batch.to(args.device)
+    seg_batch = seg_batch.to(args.device)
+    if soft_tgt_batch is not None:
+        soft_tgt_batch = soft_tgt_batch.to(args.device)
+    if route_tgt_batch is not None:
+        route_tgt_batch = route_tgt_batch.to(args.device)
 
-    correct = 0  # 初始化正确预测计数
-    # Confusion matrix.
-    confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)  # 初始化混淆矩阵
-    y_true, y_pred = [], []  # 初始化真实标签和预测标签列表
-    all_expert_indices = []  # 记录每个样本的 Top-k 专家索引（按 rank 顺序）
-    args.model.eval()  # 设置模型为评估模式
+    loss, _, _ = model(src_batch, tgt_batch, seg_batch, soft_tgt_batch, route_tgt_batch)
+    if torch.cuda.device_count() > 1:
+        loss = torch.mean(loss)
 
-    for i, (src_batch, tgt_batch, seg_batch, _) in enumerate(batch_loader(batch_size, src, tgt, seg)):  # 遍历批次数据
-        src_batch = src_batch.to(args.device)  # 将源数据批次移动到设备
-        # print(src_batch[0][113],args.tokenizer.convert_ids_to_tokens([src_batch.cpu().numpy()[0][113]]))  # 注释掉的调试信息
-        tgt_batch = tgt_batch.to(args.device)  # 将目标数据批次移动到设备
-        seg_batch = seg_batch.to(args.device)  # 将分段标识批次移动到设备
-        with torch.no_grad():  # 禁用梯度计算
-            _, logits, expert_indices = args.model(src_batch, tgt_batch, seg_batch)  # 前向传播获取logits
-        pred = torch.argmax(nn.Softmax(dim=1)(logits), dim=1)  # 获取预测结果（取最大概率的类别）
-        gold = tgt_batch  # 获取真实标签
-        for j in range(pred.size()[0]):  # 遍历批次中的每个样本
-            confusion[pred[j], gold[j]] += 1  # 更新混淆矩阵
-            y_true.append(gold[j].cpu())  # 添加真实标签到列表
-            y_pred.append(pred[j].cpu())  # 添加预测标签到列表
+    if args.fp16:
+        with args.amp.scale_loss(loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        loss.backward()
 
-            # 把这个样本的路由结果存下来。
-            # 注意：top_k>1 时列表顺序就是 rank-1, rank-2, ...，后续可直接做分 rank 分析。
+    optimizer.step()
+    scheduler.step()
+
+    return loss
+
+
+def evaluate(args, dataset, print_confusion_matrix=False):  # ???????????????????????????????
+    src = torch.LongTensor([sample[0] for sample in dataset])
+    tgt = torch.LongTensor([sample[1] for sample in dataset])
+    seg = torch.LongTensor([sample[2] for sample in dataset])
+
+    batch_size = args.batch_size
+
+    correct = 0
+    confusion = torch.zeros(args.labels_num, args.labels_num, dtype=torch.long)
+    y_true, y_pred = [], []
+    all_expert_indices = []
+    args.model.eval()
+
+    route_tgt = None
+    if getattr(args, "macro_use_route_label", False):
+        route_index = 4 if args.soft_targets else 3
+        route_tgt = torch.LongTensor([sample[route_index] if sample[route_index] is not None else -1 for sample in dataset])
+
+    for i, (src_batch, tgt_batch, seg_batch, _, route_tgt_batch) in enumerate(batch_loader(batch_size, src, tgt, seg, route_tgt=route_tgt)):
+        src_batch = src_batch.to(args.device)
+        tgt_batch = tgt_batch.to(args.device)
+        seg_batch = seg_batch.to(args.device)
+        with torch.no_grad():
+            _, logits, expert_indices = args.model(src_batch, tgt_batch, seg_batch, route_tgt=route_tgt_batch)
+        pred = torch.argmax(nn.Softmax(dim=1)(logits), dim=1)
+        gold = tgt_batch
+        for j in range(pred.size()[0]):
+            confusion[pred[j], gold[j]] += 1
+            y_true.append(gold[j].cpu())
+            y_pred.append(pred[j].cpu())
+
             if expert_indices is not None:
                 if expert_indices.dim() == 1:
                     all_expert_indices.append(expert_indices[j].cpu().item())
                 else:
                     all_expert_indices.append(expert_indices[j].cpu().tolist())
 
-        correct += torch.sum(pred == gold).item()  # 更新正确预测计数
+        correct += torch.sum(pred == gold).item()
 
-    if print_confusion_matrix:  # 如果需要打印混淆矩阵
-        print("Confusion matrix:")  # 打印混淆矩阵标题
-        print(confusion)  # 打印混淆矩阵
-        cf_array = confusion.numpy()  # 将混淆矩阵转换为numpy数组
-        # with open("./results/confusion_matrix",'w') as f:  # 注释掉的代码：保存混淆矩阵到文件
-        #     for cf_a in cf_array:  # 注释掉的代码：遍历数组
-        #         f.write(str(cf_a)+'\n')  # 注释掉的代码：写入文件
-        print("Report precision, recall, and f1:")  # 打印评估指标标题
-        eps = 1e-9  # 定义小值防止除零
-        for i in range(confusion.size()[0]):  # 遍历每个类别
-            p = confusion[i, i].item() / (confusion[i, :].sum().item() + eps)  # 计算精确率
-            r = confusion[i, i].item() / (confusion[:, i].sum().item() + eps)  # 计算召回率
-            if (p + r) == 0:  # 如果精确率和召回率都为0
-                f1 = 0  # F1分数为0
-            else:  # 如果精确率和召回率不都为0
-                f1 = 2 * p * r / (p + r)  # 计算F1分数
-            print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i, p, r, f1))  # 打印每个类别的评估指标
+    if print_confusion_matrix:
+        print("Confusion matrix:")
+        print(confusion)
+        print("Report precision, recall, and f1:")
+        eps = 1e-9
+        for i in range(confusion.size()[0]):
+            p = confusion[i, i].item() / (confusion[i, :].sum().item() + eps)
+            r = confusion[i, i].item() / (confusion[:, i].sum().item() + eps)
+            if (p + r) == 0:
+                f1 = 0
+            else:
+                f1 = 2 * p * r / (p + r)
+            print("Label {}: {:.3f}, {:.3f}, {:.3f}".format(i, p, r, f1))
 
         if len(all_expert_indices) > 0:
             import json
@@ -316,22 +324,21 @@ def evaluate(args, dataset, print_confusion_matrix=False):  # 评估模型的函
                 ],
             }
             with open("routing_analysis.json", "w") as f:
-                json.dump(routing_data, f)  # <--- 直接把数据 dump 给文件对象 f
-            print("路由数据已保存：routing_analysis.json!")
+                json.dump(routing_data, f)
+            print("????????????????????????????????????routing_analysis.json!")
 
-    print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct / len(dataset), correct, len(dataset)))  # 打印准确率
+    print("Acc. (Correct/Total): {:.4f} ({}/{}) ".format(correct / len(dataset), correct, len(dataset)))
     print("Macro precision: {:.4f}, Micro precision: {:.4f}, Weighted precision: {:.4f}".format(
         precision_score(y_true, y_pred, average='macro', zero_division=0), precision_score(y_true, y_pred, average='micro', zero_division=0),
-        precision_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种精确率
+        precision_score(y_true, y_pred, average='weighted', zero_division=0)))
     print("Macro recall: {:.4f}, Micro recall: {:.4f}, Weighted recall: {:.4f}".format(
         recall_score(y_true, y_pred, average='macro', zero_division=0), recall_score(y_true, y_pred, average='micro', zero_division=0),
-        recall_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种召回率
+        recall_score(y_true, y_pred, average='weighted', zero_division=0)))
     print("Macro f1: {:.4f}, Micro f1: {:.4f}, Weighted f1: {:.4f}".format(
         f1_score(y_true, y_pred, average='macro', zero_division=0), f1_score(y_true, y_pred, average='micro', zero_division=0),
-        f1_score(y_true, y_pred, average='weighted', zero_division=0)))  # 打印各种F1分数
+        f1_score(y_true, y_pred, average='weighted', zero_division=0)))
 
-    return f1_score(y_true, y_pred, average='macro', zero_division=0), confusion  # 返回宏F1分数和混淆矩阵
-
+    return f1_score(y_true, y_pred, average='macro', zero_division=0), confusion
 
 def main():  # 主函数
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)  # 创建参数解析器
@@ -425,8 +432,16 @@ def main():  # 主函数
     seg = torch.LongTensor([example[2] for example in trainset])  # 创建训练分段标识张量
     if args.soft_targets:  # 如果使用软目标
         soft_tgt = torch.FloatTensor([example[3] for example in trainset])  # 创建软目标张量
+        if args.macro_use_route_label:
+            route_tgt = torch.LongTensor([example[4] if example[4] is not None else -1 for example in trainset])
+        else:
+            route_tgt = None
     else:  # 如果不使用软目标
         soft_tgt = None  # 软目标为None
+        if args.macro_use_route_label:
+            route_tgt = torch.LongTensor([example[3] if example[3] is not None else -1 for example in trainset])
+        else:
+            route_tgt = None
 
     args.train_steps = int(instances_num * args.epochs_num / batch_size) + 1  # 计算训练步数
 
@@ -455,10 +470,10 @@ def main():  # 主函数
 
     for epoch in tqdm.tqdm(range(1, args.epochs_num + 1)):  # 遍历训练轮数（带进度条）
         model.train()  # 设置模型为训练模式
-        for i, (src_batch, tgt_batch, seg_batch, soft_tgt_batch) in enumerate(
-                batch_loader(batch_size, src, tgt, seg, soft_tgt)):  # 遍历训练批次
+        for i, (src_batch, tgt_batch, seg_batch, soft_tgt_batch, route_tgt_batch) in enumerate(
+                batch_loader(batch_size, src, tgt, seg, soft_tgt, route_tgt)):  # training mini-batches
             loss = train_model(args, model, optimizer, scheduler, src_batch, tgt_batch, seg_batch,
-                               soft_tgt_batch)  # 训练模型并获取损失
+                               soft_tgt_batch, route_tgt_batch)  # training step
             total_loss += loss.item()  # 累加损失
             if (i + 1) % args.report_steps == 0:  # 如果达到报告步数
                 print("Epoch id: {}, Training steps: {}, Avg loss: {:.3f}".format(epoch, i + 1,

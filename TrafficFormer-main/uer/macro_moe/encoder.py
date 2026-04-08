@@ -90,7 +90,7 @@ class MacroMoEEncoder(nn.Module):
 
         # Original routing input kept for rollback reference:
         # expert_indices, gate_loss, router_probs = self.router(inputs_embeds=emb, top_k=self.top_k)
-        expert_indices, gate_loss, router_probs = self.router(
+        expert_indices, gate_loss, router_probs, router_logits, router_probs_full = self.router(
             inputs_embeds=shared_hidden, top_k=self.top_k
         )
 
@@ -118,7 +118,7 @@ class MacroMoEEncoder(nn.Module):
             final_output_sorted = torch.cat(outputs_list, dim=0)
             reverse_indices = torch.argsort(sorted_indices)
             final_output = final_output_sorted[reverse_indices]
-            return final_output, gate_loss, expert_indices
+            return final_output, gate_loss, expert_indices, router_logits, router_probs_full
 
         topk_probs = router_probs / (router_probs.sum(dim=-1, keepdim=True) + 1e-9)
         delta_output = torch.zeros(batch_size, seq_len, hidden_size, device=emb.device, dtype=emb.dtype)
@@ -135,11 +135,11 @@ class MacroMoEEncoder(nn.Module):
             delta_output[selected] += local_delta * local_weight.view(-1, 1, 1)
 
         final_output = shared_hidden + delta_output
-        return final_output, gate_loss, expert_indices
+        return final_output, gate_loss, expert_indices, router_logits, router_probs_full
 
     def _forward_full_backbone_experts(self, emb, seg):
         batch_size, seq_len, hidden_size = emb.size()
-        expert_indices, gate_loss, router_probs = self.router(inputs_embeds=emb, top_k=self.top_k)
+        expert_indices, gate_loss, router_probs, router_logits, router_probs_full = self.router(inputs_embeds=emb, top_k=self.top_k)
 
         if expert_indices.dim() == 1:
             sorted_indices = torch.argsort(expert_indices)
@@ -167,7 +167,7 @@ class MacroMoEEncoder(nn.Module):
             final_output_sorted = torch.cat(outputs_list, dim=0)
             reverse_indices = torch.argsort(sorted_indices)
             final_output = final_output_sorted[reverse_indices]
-            return final_output, gate_loss, expert_indices
+            return final_output, gate_loss, expert_indices, router_logits, router_probs_full
 
         topk_probs = router_probs / (router_probs.sum(dim=-1, keepdim=True) + 1e-9)
         final_output = torch.zeros(batch_size, seq_len, hidden_size, device=emb.device, dtype=emb.dtype)
@@ -184,7 +184,7 @@ class MacroMoEEncoder(nn.Module):
             local_weight = (topk_probs[selected] * expert_mask[selected].float()).sum(dim=-1)
             final_output[selected] += local_out * local_weight.view(-1, 1, 1)
 
-        return final_output, gate_loss, expert_indices
+        return final_output, gate_loss, expert_indices, router_logits, router_probs_full
 
     def forward(self, emb, seg, input_ids=None, proto=None):
         if self.shared_backbone is not None:

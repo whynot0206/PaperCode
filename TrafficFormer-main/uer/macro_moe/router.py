@@ -214,4 +214,4 @@ class ProtocolRouter(nn.Module):
                     for i in range(self.num_experts):
                         self.rank_usage_counter[r, i] += (rank_indices == i).sum()
 
-        return expert_indices, load_balance_loss, router_probs_values
+        return expert_indices, load_balance_loss, router_probs_values, router_logits, router_probs

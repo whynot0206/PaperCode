@@ -32,7 +32,8 @@ class Model(nn.Module):
         # [修改] 只有 MacroMoEEncoder 会返回 tuple (output, loss)
         if "MacroMoEEncoder" in self.encoder.__class__.__name__:
             # 加上 _, 接收多出来的 expert_indices
-            output, gate_loss, _ = self.encoder(emb, seg, input_ids=src, proto=proto)
+            encoder_outputs = self.encoder(emb, seg, input_ids=src, proto=proto)
+            output, gate_loss = encoder_outputs[0], encoder_outputs[1]
         elif self.is_moe:
             output, gate_loss = self.encoder(emb, seg, src, proto)
         else:

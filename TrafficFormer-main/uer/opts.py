@@ -61,6 +61,10 @@ def model_opts(parser):
                         help="Target gap between top-1 and top-2 routing probabilities.")
     parser.add_argument("--macro_router_decorrelation_weight", type=float, default=0.5,
                         help="Weight of batch-wise expert decorrelation term.")
+    parser.add_argument("--macro_route_loss_weight", type=float, default=0.3,
+                        help="Weight of semantic route supervision loss during fine-tuning.")
+    parser.add_argument("--macro_use_route_label", action="store_true",
+                        help="Whether to supervise Macro MoE router with route_label.")
     parser.add_argument("--macro_load_balance", type=float, default=0.1,
                         help="Global weight of the gate loss in total loss (replacing moebert_load_balance).")
     parser.add_argument("--macro_top_k", type=int, default=1,
