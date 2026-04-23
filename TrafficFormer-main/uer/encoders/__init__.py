@@ -8,7 +8,7 @@ from uer.encoders.rnn_encoder import BigruEncoder
 from uer.encoders.cnn_encoder import GatedcnnEncoder
 
 
-str2encoder = {"transformer": TransformerEncoder, "rnn": RnnEncoder, "lstm": LstmEncoder,
+str2encoder = {"transformer": TransformerEncoder, "backbone_only": TransformerEncoder, "rnn": RnnEncoder, "lstm": LstmEncoder,
                "gru": GruEncoder, "birnn": BirnnEncoder, "bilstm": BilstmEncoder, "bigru": BigruEncoder,
                "gatedcnn": GatedcnnEncoder}
 

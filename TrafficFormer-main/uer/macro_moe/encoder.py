@@ -1,4 +1,5 @@
 import copy
+import warnings
 
 import torch
 import torch.nn as nn
@@ -9,6 +10,13 @@ from uer.macro_moe.expert import TrafficMacroExpert, TrafficSharedAdapterExpert
 from uer.macro_moe.router import ProtocolRouter
 
 
+warnings.filterwarnings(
+    "ignore",
+    message=r"`torch\.cpu\.amp\.autocast\(args\.\.\.\)` is deprecated.*",
+    category=FutureWarning,
+)
+
+
 class MacroMoEEncoder(nn.Module):
     def __init__(self, args):
         super(MacroMoEEncoder, self).__init__()
@@ -16,6 +24,8 @@ class MacroMoEEncoder(nn.Module):
         self.top_k = max(1, min(getattr(args, "macro_top_k", 1), self.num_experts))
         self.use_shared_backbone = getattr(args, "macro_shared_backbone", False)
         self.checkpoint_experts = getattr(args, "macro_checkpoint_experts", False)
+        self.disable_adapters = getattr(args, "macro_disable_adapters", False)
+        self.few_shot_unfreeze_last_n = getattr(args, "few_shot_unfreeze_last_n", 0)
 
         # Original full-backbone design kept here for rollback reference:
         #
@@ -43,6 +53,7 @@ class MacroMoEEncoder(nn.Module):
             balance_weight=getattr(args, "macro_router_balance_weight", 0.2),
             entropy_weight=getattr(args, "macro_router_entropy_weight", 1.0),
             target_entropy=getattr(args, "macro_router_target_entropy", 0.6),
+            router_feature=getattr(args, "macro_router_feature", "mean"),
             rank1_weight=getattr(args, "macro_router_rank1_weight", 0.0),
             rank2_weight=getattr(args, "macro_router_rank2_weight", 0.0),
             rank_target_entropy=getattr(args, "macro_router_rank_target_entropy", 0.45),
@@ -54,26 +65,36 @@ class MacroMoEEncoder(nn.Module):
 
     def set_adaptation_mode(self, mode=True):
         if self.shared_backbone is not None:
-            for param in self.shared_backbone.parameters():
-                param.requires_grad = not mode
             if mode:
-                self.shared_backbone.eval()
+                for param in self.shared_backbone.parameters():
+                    param.requires_grad = False
+
+                unfreeze_last_n = getattr(self, "few_shot_unfreeze_last_n", None)
+                if unfreeze_last_n is None:
+                    unfreeze_last_n = 0
+
+                if hasattr(self.shared_backbone, "transformer") and isinstance(self.shared_backbone.transformer, nn.ModuleList):
+                    trainable_layers = min(max(int(unfreeze_last_n), 0), len(self.shared_backbone.transformer))
+                    if trainable_layers > 0:
+                        for layer in self.shared_backbone.transformer[-trainable_layers:]:
+                            for param in layer.parameters():
+                                param.requires_grad = True
+                        self.shared_backbone.train()
+                    else:
+                        self.shared_backbone.eval()
+                else:
+                    self.shared_backbone.eval()
             else:
+                for param in self.shared_backbone.parameters():
+                    param.requires_grad = True
                 self.shared_backbone.train()
 
-            # Original shared-backbone few-shot behavior kept for rollback reference:
-            # router remained trainable while only the shared backbone was frozen.
-            #
-            # In the current small-sample setting, we freeze the router together with
-            # the shared backbone so the model only adapts the lightweight expert
-            # deltas (plus the classifier head outside this module). This better
-            # matches the "fast adapter-style adaptation" objective.
+            # Few-shot adaptation keeps the shared backbone frozen while allowing
+            # the router to adapt to the downstream label space and reassign
+            # samples to more suitable experts.
             for param in self.router.parameters():
-                param.requires_grad = not mode
-            if mode:
-                self.router.eval()
-            else:
-                self.router.train()
+                param.requires_grad = True
+            self.router.train()
 
         for expert in self.experts:
             expert.set_adaptation_mode(mode)
@@ -81,12 +102,16 @@ class MacroMoEEncoder(nn.Module):
     def _run_expert(self, expert_id, inputs):
         expert = self.experts[expert_id]
         if self.checkpoint_experts and self.training:
-            return checkpoint(expert, inputs)
+            return checkpoint(expert, inputs, use_reentrant=False)
         return expert(inputs)
 
     def _forward_shared_backbone(self, emb, seg):
         batch_size, seq_len, hidden_size = emb.size()
         shared_hidden = self.shared_backbone(emb, seg)
+
+        if self.disable_adapters:
+            zero_gate_loss = shared_hidden.new_zeros(())
+            return shared_hidden, zero_gate_loss, None, None, None
 
         # Original routing input kept for rollback reference:
         # expert_indices, gate_loss, router_probs = self.router(inputs_embeds=emb, top_k=self.top_k)

@@ -22,9 +22,9 @@ def main():
     ROOT_DIR = "/home/xuke/why_code/trafficformer"
 
     # 原始数据路径
-    RAW_PCAP_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN-App")
-    SPLIT_OUTPUT_DIR = os.path.join(ROOT_DIR, "data/ISCX-VPN-App_split")
-    DATASET_OUTPUT_DIR = os.path.join(ROOT_DIR, "ISCX-VPN-App_dataset")
+    RAW_PCAP_DIR = os.path.join(ROOT_DIR, "moe_dataset_finetuning/ISCX-Tor")
+    SPLIT_OUTPUT_DIR = os.path.join(ROOT_DIR, "moe_dataset_finetuning/ISCX-Tor_split")
+    DATASET_OUTPUT_DIR = os.path.join(ROOT_DIR, "ISCX-Tor_dataset")
 
     FEATURES = ['datagram', "length", "time", "direction", "message_type"]
 
@@ -269,6 +269,138 @@ all     1204
 label number of train: 6, val: 6, test: 6.
 finish generating pre-train's datagram dataset.
 Please check in /home/xuke/why_code/trafficformer/ISCX-VPN_dataset/dataset
+Step 3 完成。
+
+'''
+'''
+
+--- [Step 3] 正在生成 TSV 数据集 ---
+read dataset from json file.
+category flow
+0       491
+1       139
+2       433
+3       307
+4       228
+5       306
+6       484
+7       460
+8       500
+9       476
+10      477
+11      492
+12      429
+13      402
+14      56
+15      496
+16      484
+17      495
+18      498
+19      171
+20      16
+21      495
+22      485
+23      448
+24      498
+25      495
+26      326
+27      155
+28      469
+29      491
+30      494
+31      151
+32      497
+33      475
+34      168
+35      495
+36      258
+37      495
+38      476
+39      495
+40      493
+41      257
+42      498
+43      134
+44      474
+45      218
+46      475
+47      496
+48      399
+49      138
+50      401
+51      497
+52      171
+53      491
+54      497
+55      216
+56      488
+57      463
+58      498
+59      485
+60      473
+61      389
+62      163
+63      480
+64      494
+65      358
+66      496
+67      418
+68      488
+69      490
+70      392
+71      386
+72      204
+73      368
+74      170
+75      191
+76      491
+77      143
+78      486
+79      500
+80      497
+81      498
+82      407
+83      443
+84      153
+85      176
+86      490
+87      491
+88      489
+89      495
+90      160
+91      276
+92      104
+93      260
+94      466
+95      496
+96      457
+97      487
+98      140
+99      118
+100     486
+101     494
+102     284
+103     474
+104     135
+105     490
+106     222
+107     190
+108     430
+109     500
+110     356
+111     311
+112     428
+113     207
+114     340
+115     491
+116     475
+117     495
+118     491
+119     485
+all     45962
+label number of train: 120, val: 120, test: 120.
+finish generating pre-train's datagram dataset.
+Please check in /home/xuke/why_code/trafficformer/cstnet-tls 1.3_dataset/dataset
 Step 3 完成。
 
 '''

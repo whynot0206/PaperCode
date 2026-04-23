@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import copy
 from uer.encoders.transformer_encoder import TransformerEncoder
-from uer.macro_moe.adapter import FewShotAdapter
+from uer.macro_moe.adapter import FewShotAdapter, build_shared_expert_module
 
 
 class TrafficMacroExpert(nn.Module):
@@ -110,11 +110,14 @@ class TrafficSharedAdapterExpert(nn.Module):
         hidden_size = args.hidden_size
         adapter_size = getattr(args, "adapter_size", 32)
         dropout = getattr(args, "dropout", 0.1)
-
-        self.down_project = nn.Linear(hidden_size, adapter_size)
-        self.activation = nn.ReLU()
-        self.dropout = nn.Dropout(dropout)
-        self.up_project = nn.Linear(adapter_size, hidden_size)
+        expert_type = getattr(args, "macro_shared_expert_type", "thin")
+        self.expert_type = expert_type
+        self.delta_module = build_shared_expert_module(
+            hidden_size,
+            adapter_size=adapter_size,
+            dropout=dropout,
+            expert_type=expert_type,
+        )
 
     def set_adaptation_mode(self, mode=True):
         # Kept for interface compatibility with TrafficMacroExpert.
@@ -134,8 +137,4 @@ class TrafficSharedAdapterExpert(nn.Module):
         return total_sq_norm ** 0.5
 
     def forward(self, shared_hidden):
-        delta = self.down_project(shared_hidden)
-        delta = self.activation(delta)
-        delta = self.dropout(delta)
-        delta = self.up_project(delta)
-        return delta
+        return self.delta_module(shared_hidden)

@@ -28,12 +28,17 @@ class Model(nn.Module):
 
     def forward(self, src, tgt, seg, proto=None):
         emb = self.embedding(src, seg)
+        router_logits = None
+        router_probs = None
 
         # [修改] 只有 MacroMoEEncoder 会返回 tuple (output, loss)
         if "MacroMoEEncoder" in self.encoder.__class__.__name__:
             # 加上 _, 接收多出来的 expert_indices
             encoder_outputs = self.encoder(emb, seg, input_ids=src, proto=proto)
             output, gate_loss = encoder_outputs[0], encoder_outputs[1]
+            if len(encoder_outputs) >= 5:
+                router_logits = encoder_outputs[3]
+                router_probs = encoder_outputs[4]
         elif self.is_moe:
             output, gate_loss = self.encoder(emb, seg, src, proto)
         else:
@@ -41,7 +46,10 @@ class Model(nn.Module):
             gate_loss = 0.0
 
         # 计算任务损失
-        loss_info = self.target(output, tgt)
+        if self.target.__class__.__name__ == "BertFlowTarget":
+            loss_info = self.target(output, tgt, proto=proto, router_probs=router_probs, router_logits=router_logits)
+        else:
+            loss_info = self.target(output, tgt)
 
         # [修改] 将 gate_loss 附加到返回的元组末尾
         if isinstance(loss_info, tuple):

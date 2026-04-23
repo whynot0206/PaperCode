@@ -233,83 +233,61 @@ class MlmTrainer(Trainer):  # 定义MLM任务训练器，继承自Trainer
         self.total_denominator = 0.0  # 重置总分母数
 
 
-class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
-    def __init__(self, args):  # 初始化BERT训练器
-        super(BertTrainer, self).__init__(args)  # 调用父类初始化方法
-        self.total_loss_sp = 0.0  # 初始化句子对预测任务总损失
-        self.total_correct_sp = 0.0  # 初始化句子对预测任务总正确预测数
-        self.total_instances = 0.0  # 初始化总实例数
-
-        self.total_loss_mlm = 0.0  # 初始化MLM任务总损失
-        self.total_correct_mlm = 0.0  # 初始化MLM任务总正确预测数
-        self.total_denominator = 0.0  # 初始化MLM任务总分母数
+class BertTrainer(Trainer):
+    def __init__(self, args):
+        super(BertTrainer, self).__init__(args)
+        self.target_name = args.target
+        self.total_loss_sp = 0.0
+        self.total_correct_sp = 0.0
+        self.total_instances = 0.0
+        self.total_loss_mlm = 0.0
+        self.total_correct_mlm = 0.0
+        self.total_denominator = 0.0
         self.total_gate_loss = 0.0
-        self.total_router_specialization = 0.0
-        self.total_router_margin = 0.0
-        self.total_router_decorrelation = 0.0
-        self.total_router_balance = 0.0
-        self.total_router_entropy = 0.0
-        self.total_router_rank = 0.0
+        self.total_loss_proto_cls = 0.0
+        self.total_loss_proto_route = 0.0
+        self.total_correct_proto_cls = 0.0
+        self.total_correct_proto_route = 0.0
         self.load_balance_alpha = getattr(args, "macro_load_balance", 0.1)
-        self.is_moe = getattr(args, "is_moe", False)  # 确保 is_moe 属性存在
-        self.is_macro_moe = (args.encoder == "macro_moe")  # 添加 macro_moe 标志
+        self.is_moe = getattr(args, "is_moe", False)
+        self.is_macro_moe = (args.encoder == "macro_moe")
 
-    def forward_propagation(self, batch, model):  # 定义BERT前向传播
-        debug_mode = False  # 设置调试模式为False
-        if debug_mode:  # 如果启用调试模式
-            print("In function forward_propagation(self, batch, model):")  # 打印调试信息
-            print("type of batch:", type(batch))  # 打印batch类型
-            print("type of the content of batch:", [type(elem) for elem in batch])  # 打印batch中各元素类型
-        if len(batch) == 5:  # 如果batch包含5个元素（包含协议信息）
-            src, tgt_mlm, tgt_sp, seg, proto = batch  # 解包批次数据：输入序列、MLM目标、句子对目标、段落标记、协议信息
-            loss_info = model(src, (tgt_mlm, tgt_sp), seg, proto)  # 调用模型前向传播（带协议信息）
-        else:  # 如果batch不包含协议信息
-            src, tgt_mlm, tgt_sp, seg = batch  # 解包批次数据：输入序列、MLM目标、句子对目标、段落标记
-            loss_info = model(src, (tgt_mlm, tgt_sp), seg)  # 调用模型前向传播
-
-        if self.is_moe or self.is_macro_moe:
-            loss_mlm, loss_sp, correct_mlm, correct_sp, denominator, gate_loss = loss_info
+    def forward_propagation(self, batch, model):
+        if len(batch) == 5:
+            src, tgt_mlm, tgt_sp, seg, proto = batch
+            loss_info = model(src, (tgt_mlm, tgt_sp), seg, proto)
         else:
-            # 注意：由于你的 model.py 总是返回 + (gate_loss,)，
-            # 如果跑普通 BERT，进入这个 else 分支会报错 (ValueError: too many values to unpack)。
-            # 临时解决方法是让 else 分支也接收 gate_loss 并忽略它，或者确保上面的 if 覆盖所有情况。
+            src, tgt_mlm, tgt_sp, seg = batch
+            loss_info = model(src, (tgt_mlm, tgt_sp), seg)
 
-            # 建议的兼容写法（既能跑 MoE 也能跑普通 BERT）：
+        if self.target_name == "bertflow":
+            total_task_loss, loss_mlm, loss_sp, loss_proto_cls, loss_proto_route,                 correct_mlm, correct_sp, correct_proto_cls, correct_proto_route,                 denominator, instance_count, gate_loss = loss_info
+            loss = total_task_loss + self.load_balance_alpha * gate_loss
+        else:
             if len(loss_info) == 6:
                 loss_mlm, loss_sp, correct_mlm, correct_sp, denominator, gate_loss = loss_info
             else:
                 loss_mlm, loss_sp, correct_mlm, correct_sp, denominator = loss_info
                 gate_loss = 0.0
+            loss_proto_cls = 0.0
+            loss_proto_route = 0.0
+            correct_proto_cls = 0.0
+            correct_proto_route = 0.0
+            instance_count = float(src.size(0))
+            loss = loss_mlm / 10 + loss_sp + self.load_balance_alpha * gate_loss
 
-            # ... (计算总 loss)
-            # 确保 load_balance_alpha 已定义，否则这里用 args.load_balance_alpha
-        loss = loss_mlm / 10 + loss_sp + self.load_balance_alpha * gate_loss
         self.total_loss += loss.item()
-
-        # [Fix 2] 安全地累加 gate_loss (处理 float 和 Tensor 两种情况)
-        if isinstance(gate_loss, torch.Tensor):
-            self.total_gate_loss += gate_loss.item()
-        else:
-            self.total_gate_loss += gate_loss
-
+        self.total_gate_loss += gate_loss.item() if isinstance(gate_loss, torch.Tensor) else gate_loss
         self.total_loss_mlm += loss_mlm.item()
         self.total_loss_sp += loss_sp.item()
+        self.total_loss_proto_cls += loss_proto_cls.item() if isinstance(loss_proto_cls, torch.Tensor) else loss_proto_cls
+        self.total_loss_proto_route += loss_proto_route.item() if isinstance(loss_proto_route, torch.Tensor) else loss_proto_route
         self.total_correct_mlm += correct_mlm.item()
         self.total_correct_sp += correct_sp.item()
+        self.total_correct_proto_cls += correct_proto_cls.item() if isinstance(correct_proto_cls, torch.Tensor) else correct_proto_cls
+        self.total_correct_proto_route += correct_proto_route.item() if isinstance(correct_proto_route, torch.Tensor) else correct_proto_route
         self.total_denominator += denominator.item()
-        self.total_instances += src.size(0)
-
-        raw_model = model.module if hasattr(model, "module") else model
-        router_terms = {}
-        if hasattr(raw_model, "encoder") and hasattr(raw_model.encoder, "router"):
-            router_terms = getattr(raw_model.encoder.router, "latest_loss_terms", {}) or {}
-
-        self.total_router_specialization += float(router_terms.get("router_specialization", 0.0))
-        self.total_router_margin += float(router_terms.get("router_margin", 0.0))
-        self.total_router_decorrelation += float(router_terms.get("router_decorrelation", 0.0))
-        self.total_router_balance += float(router_terms.get("router_balance", 0.0))
-        self.total_router_entropy += float(router_terms.get("router_entropy", 0.0))
-        self.total_router_rank += float(router_terms.get("router_rank", 0.0))
+        self.total_instances += instance_count.item() if isinstance(instance_count, torch.Tensor) else instance_count
 
         loss = loss / self.accumulation_steps
         return loss
@@ -319,48 +297,67 @@ class BertTrainer(Trainer):  # 定义BERT任务训练器，继承自Trainer
         if self.dist_train:
             done_tokens *= self.world_size
 
-        print("| {:8d}/{:8d} steps"
-              "| {:3.3f} s"
-              "| {:8.2f} tokens/s"
-              "| loss {:7.2f}"
-              "| gate_loss: {:3.3f}"
-              "| router_spec: {:3.3f}"
-              "| margin: {:3.3f}"
-              "| decor: {:3.3f}"
-              "| balance: {:3.3f}"
-              "| entropy: {:3.3f}"
-              "| rank: {:3.3f}"
-              "| loss_mlm: {:3.3f}"
-              "| loss_sp: {:3.3f}"
-              "| acc_mlm: {:3.3f}"
-              "| acc_sp: {:3.3f}".format(
-            self.current_step,
-            self.total_steps,
-            (time.time() - self.start_time),
-            done_tokens / (time.time() - self.start_time),
-            self.total_loss / self.report_steps,
-            self.total_gate_loss / self.report_steps,
-            self.total_router_specialization / self.report_steps,
-            self.total_router_margin / self.report_steps,
-            self.total_router_decorrelation / self.report_steps,
-            self.total_router_balance / self.report_steps,
-            self.total_router_entropy / self.report_steps,
-            self.total_router_rank / self.report_steps,
-            self.total_loss_mlm / self.report_steps,
-            self.total_loss_sp / self.report_steps,
-            self.total_correct_mlm / self.total_denominator,
-            self.total_correct_sp / self.total_instances))
+        if self.target_name == "bertflow":
+            print("| {:8d}/{:8d} steps"
+                  "| {:3.3f} s"
+                  "| {:8.2f} tokens/s"
+                  "| loss {:7.2f}"
+                  "| gate_loss {:3.3f}"
+                  "| loss_mbm {:3.3f}"
+                  "| loss_rel {:3.3f}"
+                  "| loss_pcls {:3.3f}"
+                  "| loss_proute {:3.3f}"
+                  "| acc_mbm {:3.3f}"
+                  "| acc_rel {:3.3f}"
+                  "| acc_pcls {:3.3f}"
+                  "| acc_proute {:3.3f}".format(
+                self.current_step,
+                self.total_steps,
+                (time.time() - self.start_time),
+                done_tokens / (time.time() - self.start_time),
+                self.total_loss / self.report_steps,
+                self.total_gate_loss / self.report_steps,
+                self.total_loss_mlm / self.report_steps,
+                self.total_loss_sp / self.report_steps,
+                self.total_loss_proto_cls / self.report_steps,
+                self.total_loss_proto_route / self.report_steps,
+                self.total_correct_mlm / self.total_denominator,
+                self.total_correct_sp / self.total_instances,
+                self.total_correct_proto_cls / self.total_instances,
+                self.total_correct_proto_route / self.total_instances))
+        else:
+            print("| {:8d}/{:8d} steps"
+                  "| {:3.3f} s"
+                  "| {:8.2f} tokens/s"
+                  "| loss {:7.2f}"
+                  "| gate_loss: {:3.3f}"
+                  "| loss_mlm: {:3.3f}"
+                  "| loss_sp: {:3.3f}"
+                  "| acc_mlm: {:3.3f}"
+                  "| acc_sp: {:3.3f}".format(
+                self.current_step,
+                self.total_steps,
+                (time.time() - self.start_time),
+                done_tokens / (time.time() - self.start_time),
+                self.total_loss / self.report_steps,
+                self.total_gate_loss / self.report_steps,
+                self.total_loss_mlm / self.report_steps,
+                self.total_loss_sp / self.report_steps,
+                self.total_correct_mlm / self.total_denominator,
+                self.total_correct_sp / self.total_instances))
 
-        # [Fix 3] 必须重置 total_gate_loss
-        self.total_loss, self.total_loss_mlm, self.total_loss_sp, self.total_gate_loss = 0.0, 0.0, 0.0, 0.0
-        self.total_router_specialization = 0.0
-        self.total_router_margin = 0.0
-        self.total_router_decorrelation = 0.0
-        self.total_router_balance = 0.0
-        self.total_router_entropy = 0.0
-        self.total_router_rank = 0.0
-        self.total_correct_mlm, self.total_denominator = 0.0, 0.0
-        self.total_correct_sp, self.total_instances = 0.0, 0.0
+        self.total_loss = 0.0
+        self.total_loss_mlm = 0.0
+        self.total_loss_sp = 0.0
+        self.total_loss_proto_cls = 0.0
+        self.total_loss_proto_route = 0.0
+        self.total_gate_loss = 0.0
+        self.total_correct_mlm = 0.0
+        self.total_correct_sp = 0.0
+        self.total_correct_proto_cls = 0.0
+        self.total_correct_proto_route = 0.0
+        self.total_denominator = 0.0
+        self.total_instances = 0.0
 
 
 class AlbertTrainer(BertTrainer):  # 定义ALBERT任务训练器，继承自BertTrainer

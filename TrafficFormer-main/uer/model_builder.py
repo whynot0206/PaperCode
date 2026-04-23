@@ -1,3 +1,4 @@
+import copy
 import torch
 from uer.layers import *
 from uer.encoders import *
@@ -28,6 +29,12 @@ def build_model(args):
         else:
             print(f"Loading MacroMoE: Pre-training/Full Fine-tuning Mode (Backbones Active)")
             encoder.set_adaptation_mode(False)
+    elif args.encoder == "backbone_only":
+        args_copy = copy.deepcopy(args)
+        args_copy.encoder = "transformer"
+        args_copy.is_moe = False
+        print("Loading BackboneOnly: Transformer backbone without router/adapters/experts")
+        encoder = str2encoder["transformer"](args_copy)
     else:
         encoder = str2encoder[args.encoder](args)
 

@@ -10,7 +10,7 @@ from vocab_gen import build_BPE, build_vocab
 
 
 def main():
-    print("开始生成ET-BERT预训练数据...")
+    print("开始生成预训练数据...")
 
     # ==========================================
     # 修正点 1: 定义清晰的路径变量
@@ -18,22 +18,22 @@ def main():
     # 原始PCAP文件夹
     raw_pcap_dir = "data/pretrain/raw_pcapng/"
     # 转换后的PCAP文件夹
-    converted_pcap_dir = "data/pretrain/converted_pcap/"
+    converted_pcap_dir = "data/pretrain_moe/converted_pcap/"
     # 分割后的Flow文件夹
-    split_flow_dir = "data/pretrain/split_flows/"
+    split_flow_dir = "data/pretrain_moe/split_flows/"
 
     # [关键] 这是一个目录，用于存放多进程生成的临时txt碎片
     # 必须以 "/" 结尾，否则 merge 函数的 path[:-1] 逻辑会出错
-    corpus_temp_dir = "data/pretrain/corpus_temp/"
+    corpus_temp_dir = "data/pretrain_moe/corpus_temp/"
 
     # 最终合并后的语料文件路径 (由脚本自动生成，逻辑是 corpus_temp_dir 去掉末尾斜杠 + _biburst.txt)
     # 也就是: data/pretrain/corpus_temp_biburst.txt
-    merged_corpus_file = "data/pretrain/corpus_temp_biburst.txt"
+    merged_corpus_file = "data/pretrain_moe/corpus_temp_biburst.txt"
 
     # 最终的 bigram 格式文件
-    bigram_file = "data/pretrain/corpus_bigram.txt"
+    bigram_file = "data/pretrain_moe/corpus_bigram.txt"
     # 词表文件
-    vocab_file = "../models/encryptd_vocab.txt"
+    vocab_file = "../models/encryptd_vocab_moe.txt"
 
     # 1. 生成预训练语料
     print(f"步骤1/3: 生成预训练语料 (输出到 {corpus_temp_dir})...")
@@ -76,8 +76,9 @@ def main():
 if __name__ == "__main__":
     # 创建必要的目录
     os.makedirs("data/pretrain/raw_pcapng", exist_ok=True)
-    os.makedirs("data/pretrain/converted_pcap", exist_ok=True)
-    os.makedirs("data/pretrain/split_flows", exist_ok=True)
+    os.makedirs("data/pretrain_moe/converted_pcap", exist_ok=True)
+    os.makedirs("data/pretrain_moe/split_flows", exist_ok=True)
+    os.makedirs("data/pretrain_moe/corpus_temp", exist_ok=True)
     # 此时不需要创建 corpus.txt 文件，而是需要清理旧环境
 
     print("目录结构已创建")

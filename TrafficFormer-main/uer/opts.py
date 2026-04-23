@@ -13,7 +13,7 @@ def model_opts(parser):
     parser.add_argument("--remove_attention_scale", action="store_true",
                         help="Remove attention scale.")
     # [修改] 添加 macro_moe 选项
-    parser.add_argument("--encoder", choices=["transformer", "rnn", "lstm", "gru",
+    parser.add_argument("--encoder", choices=["transformer", "backbone_only", "rnn", "lstm", "gru",
                                               "birnn", "bilstm", "bigru",
                                               "gatedcnn", "macro_moe"],
                         default="transformer", help="Encoder type.")
@@ -39,6 +39,8 @@ def model_opts(parser):
                         help="Hidden size of the few-shot adapter.")
     parser.add_argument("--few_shot_stage", action='store_true',
                         help="If true, freeze backbone and only train adapters.")
+    parser.add_argument("--few_shot_unfreeze_last_n", type=int, default=0,
+                        help="When few_shot_stage is enabled, unfreeze the last N shared backbone layers.")
     parser.add_argument("--macro_router_noise_std", type=float, default=0.01,
                         help="Std of Gaussian noise added to Macro MoE router logits during training.")
     parser.add_argument("--macro_router_balance_weight", type=float, default=0.2,
@@ -47,6 +49,8 @@ def model_opts(parser):
                         help="Weight of entropy-target term inside Macro MoE router aux loss.")
     parser.add_argument("--macro_router_target_entropy", type=float, default=0.6,
                         help="Target normalized routing entropy in [0,1]. Lower means more specialization.")
+    parser.add_argument("--macro_router_feature", choices=["mean", "cls"], default="mean",
+                        help="Routing feature for Macro MoE router. 'mean' uses masked mean pooling; 'cls' uses the first token representation.")
     parser.add_argument("--macro_router_rank1_weight", type=float, default=0.0,
                         help="Extra anti-collapse weight for rank-1 routing. Default 0 disables it.")
     parser.add_argument("--macro_router_rank2_weight", type=float, default=0.0,
@@ -73,6 +77,20 @@ def model_opts(parser):
                         help="Enable gradient checkpointing on Macro-MoE experts to reduce GPU memory usage.")
     parser.add_argument("--macro_shared_backbone", action='store_true',
                         help="Use one shared TrafficFormer backbone and route lightweight adapter experts on top of it.")
+    parser.add_argument("--macro_disable_adapters", action='store_true',
+                        help="Ablation mode for Macro MoE shared-backbone encoder: disable router and adapter experts, keeping only the shared backbone.")
+    parser.add_argument("--macro_shared_expert_type", choices=["thin", "mlp", "gated"], default="thin",
+                        help="Expert module type used in the shared-backbone Macro MoE path. 'thin' keeps the original bottleneck adapter, while 'mlp' and 'gated' provide stronger expert capacity.")
+    parser.add_argument("--bertflow_rel_loss_weight", type=float, default=1.0,
+                        help="Weight of hierarchical flow relation loss in bertflow pretraining.")
+    parser.add_argument("--bertflow_mbm_loss_weight", type=float, default=0.4,
+                        help="Weight of masked byte modeling loss in bertflow pretraining.")
+    parser.add_argument("--bertflow_proto_cls_loss_weight", type=float, default=0.3,
+                        help="Weight of CLS-based protocol weak-supervision loss in bertflow pretraining.")
+    parser.add_argument("--bertflow_proto_route_loss_weight", type=float, default=0.3,
+                        help="Weight of router-based protocol weak-supervision loss in bertflow pretraining.")
+    parser.add_argument("--flow_proto_num", type=int, default=2,
+                        help="Number of weak protocol proto labels carried by bertflow pretraining data.")
 
 def optimization_opts(parser):
     parser.add_argument("--learning_rate", type=float, default=2e-5,

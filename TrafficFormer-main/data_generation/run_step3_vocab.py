@@ -1,7 +1,7 @@
 from vocab_gen import build_BPE, build_vocab
 
 merged_corpus_file = "data/pretrain/corpus_temp_biburst.txt"
-vocab_file = "../models/encryptd_vocab.txt"
+vocab_file = "../models/encryptd_vocab_test1.txt"
 
 print("开始执行步骤3：构建词表...")
 

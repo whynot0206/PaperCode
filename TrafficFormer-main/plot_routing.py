@@ -35,7 +35,7 @@ DEFAULT_CLASS_NAMES = [
 # =========================
 # 你每次实验只改这里即可
 # =========================
-SAVE_TAG = "v1_4e_adapter+backbone_top2_ISCX-VPN-Service-share-adapter-test1-seed7"
+SAVE_TAG = "v1_4e_adapter+backbone_finetuned_model_ISCX_VPN_Service_newtarget_shared_adapter768_top2_bs64_gated_tuned_v4_noise035_seed13"
 
 # 总目录：expert_top/
 BASE_SAVE_DIR = Path("expert_top")

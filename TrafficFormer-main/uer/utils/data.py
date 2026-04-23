@@ -657,11 +657,23 @@ class BertFlowDataset(Dataset):
         while i < len(document):
             rnd = random.random()  # 生成一个 0-1 之间的随机数，决定当前 Burst 用于构建哪种任务
 
-            # ==============================================================================
-            # 分支 1：单 Burst 切分任务 (对应 SODF Label 0 & 1)
-            # 触发条件：如果是最后一个 Burst，或者随机数 < 0.4 (40% 概率)
-            # ==============================================================================
-            if i == len(document) - 1 or rnd < 0.4:
+            # 6-way hierarchical flow relation labels:
+            # 0: same_burst_forward
+            # 1: same_burst_reverse
+            # 2: adjacent_burst_forward
+            # 3: adjacent_burst_reverse
+            # 4: distant_same_flow
+            # 5: different_flow
+
+            can_same_burst = True
+            can_adjacent = i < len(document) - 1
+            distant_candidates = [idx for idx in range(len(document)) if abs(idx - i) >= 2]
+            can_distant = len(distant_candidates) > 0
+
+            # ------------------------------------------------------------------------------
+            # Branch 1: same burst local relation.
+            # ------------------------------------------------------------------------------
+            if (not can_adjacent and not can_distant) or rnd < 0.35:
                 a_end = 1  # 初始化切分点
                 if len(document[i]) >= 2:
                     a_end = random.randint(1, len(document[i]) - 1)  # 随机选择当前 Burst 内部的一个切分点
@@ -680,7 +692,7 @@ class BertFlowDataset(Dataset):
                 # --- 随机交换逻辑 ---
                 if random.random() < 0.5:
                     # 情况 A：保持原序 (A1 -> A2)
-                    label = 0  # Label 0: 同源，顺序正确
+                    label = 0
                     src = []
                     src.append(self.vocab.get(CLS_TOKEN))  # 添加 [CLS]
                     src.extend(tokens_a)  # 添加第一段
@@ -691,7 +703,7 @@ class BertFlowDataset(Dataset):
                     seg_pos.append(len(src))  # 记录第二段结束位置
                 else:
                     # 情况 B：交换顺序 (A2 -> A1)
-                    label = 1  # Label 1: 同源，顺序颠倒
+                    label = 1
                     src = []
                     src.append(self.vocab.get(CLS_TOKEN))
                     src.extend(tokens_b)  # 先放第二段
@@ -701,78 +713,24 @@ class BertFlowDataset(Dataset):
                     src.append(self.vocab.get(SEP_TOKEN))
                     seg_pos.append(len(src))
 
-            # ==============================================================================
-            # 分支 2：随机跳转/不同 Flow 任务 (主要对应 SODF Label 2)
-            # 触发条件：随机数在 0.4 到 0.6 之间 (20% 概率)
-            # ==============================================================================
-            elif rnd < 0.6:
+            # ------------------------------------------------------------------------------
+            # Branch 2: adjacent bursts in the same flow.
+            # ------------------------------------------------------------------------------
+            elif can_adjacent and rnd < 0.7:
                 tokens_a = []
                 for j in range(len(document[i])):
-                    tokens_a.extend(document[i][j])  # 当前 Burst 作为 tokens_a
+                    tokens_a.extend(document[i][j])
 
-                # 计算 tokens_b 允许的最大长度
-                next_burst_max_length = target_seq_length - len(tokens_a)
-
-                # --- 随机采样另一个 Burst ---
-                for _ in range(20):  # 尝试 20 次寻找另一个 Flow
-                    random_document_index = random.randint(0, len(all_documents) - 1)
-                    if random_document_index != document_index:  # 尽量找不同的 Flow
-                        break
-
-                random_document = all_documents[random_document_index]  # 获取随机选中的 Flow
-                random_start = random.randint(0, len(random_document) - 1)  # 在该 Flow 中随机选一个 Burst
-                burst_ind_end = random_start + 1
-
-                tokens_b = []
-                for burst_ind in range(random_start, burst_ind_end):
-                    for j in range(len(random_document[burst_ind])):
-                        tokens_b.extend(random_document[burst_ind][j])  # 填充随机选中的 Burst 数据
-                        if len(tokens_b) >= next_burst_max_length:
-                            break
-
-                truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)  # 截断
-
-                # --- 确定标签 ---
-                if random_document_index == document_index:
-                    # 如果运气不好随机到了同一个 Flow (极低概率)，则退化为同 Flow 任务
-                    if random_start >= i:
-                        label = 3  # 后序 Burst
-                    else:
-                        label = 4  # 前序 Burst
-                else:
-                    label = 2  # Label 2: 来自完全不同的 Flow (这是本分支的主要目的)
-
-                # 构建输入序列
-                src = []
-                src.append(self.vocab.get(CLS_TOKEN))
-                src.extend(tokens_a)
-                src.append(self.vocab.get(SEP_TOKEN))
-                seg_pos = [len(src)]
-                src.extend(tokens_b)
-                src.append(self.vocab.get(SEP_TOKEN))
-                seg_pos.append(len(src))
-
-            # ==============================================================================
-            # 分支 3：连续 Bursts 任务 (对应 SODF Label 3 & 4)
-            # 触发条件：剩余情况 (40% 概率)
-            # ==============================================================================
-            else:
-                tokens_a = []
-                for j in range(len(document[i])):
-                    tokens_a.extend(document[i][j])  # 当前 Burst 作为 tokens_a
-
-                i += 1  # 索引 +1，获取下一个 Burst
+                i += 1
 
                 tokens_b = []
                 for j in range(len(document[i])):
-                    tokens_b.extend(document[i][j])  # 下一个 Burst 作为 tokens_b
+                    tokens_b.extend(document[i][j])
 
-                truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)  # 截断
+                truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)
 
-                # --- 随机交换逻辑 ---
                 if random.random() < 0.5:
-                    # 情况 A：保持原序 (Burst 1 -> Burst 2)
-                    label = 3  # Label 3: 同 Flow，连续，顺序正确
+                    label = 2
                     src = []
                     src.append(self.vocab.get(CLS_TOKEN))
                     src.extend(tokens_a)
@@ -782,14 +740,110 @@ class BertFlowDataset(Dataset):
                     src.append(self.vocab.get(SEP_TOKEN))
                     seg_pos.append(len(src))
                 else:
-                    # 情况 B：交换顺序 (Burst 2 -> Burst 1)
-                    label = 4  # Label 4: 同 Flow，连续，顺序颠倒
+                    label = 3
                     src = []
                     src.append(self.vocab.get(CLS_TOKEN))
                     src.extend(tokens_b)
                     src.append(self.vocab.get(SEP_TOKEN))
                     seg_pos = [len(src)]
                     src.extend(tokens_a)
+                    src.append(self.vocab.get(SEP_TOKEN))
+                    seg_pos.append(len(src))
+
+            # ------------------------------------------------------------------------------
+            # Branch 3: distant but same-flow relation.
+            # ------------------------------------------------------------------------------
+            elif can_distant and rnd < 0.85:
+                other_index = random.choice(distant_candidates)
+                first_index = min(i, other_index)
+                second_index = max(i, other_index)
+
+                tokens_a = []
+                for j in range(len(document[first_index])):
+                    tokens_a.extend(document[first_index][j])
+
+                tokens_b = []
+                for j in range(len(document[second_index])):
+                    tokens_b.extend(document[second_index][j])
+
+                truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)
+
+                label = 4
+                src = []
+                src.append(self.vocab.get(CLS_TOKEN))
+                src.extend(tokens_a)
+                src.append(self.vocab.get(SEP_TOKEN))
+                seg_pos = [len(src)]
+                src.extend(tokens_b)
+                src.append(self.vocab.get(SEP_TOKEN))
+                seg_pos.append(len(src))
+
+            # ------------------------------------------------------------------------------
+            # Branch 4: different-flow relation.
+            # ------------------------------------------------------------------------------
+            else:
+                tokens_a = []
+                for j in range(len(document[i])):
+                    tokens_a.extend(document[i][j])  # 当前 Burst 作为 tokens_a
+
+                # 计算 tokens_b 允许的最大长度
+                next_burst_max_length = target_seq_length - len(tokens_a)
+
+                if len(all_documents) == 1:
+                    label = 4
+                    other_index = random.choice(distant_candidates) if can_distant else i
+                    first_index = min(i, other_index)
+                    second_index = max(i, other_index)
+
+                    tokens_a = []
+                    for j in range(len(document[first_index])):
+                        tokens_a.extend(document[first_index][j])
+
+                    tokens_b = []
+                    for j in range(len(document[second_index])):
+                        tokens_b.extend(document[second_index][j])
+
+                    truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)
+
+                    src = []
+                    src.append(self.vocab.get(CLS_TOKEN))
+                    src.extend(tokens_a)
+                    src.append(self.vocab.get(SEP_TOKEN))
+                    seg_pos = [len(src)]
+                    src.extend(tokens_b)
+                    src.append(self.vocab.get(SEP_TOKEN))
+                    seg_pos.append(len(src))
+                else:
+
+                    # --- 随机采样另一个 Burst ---
+                    for _ in range(20):  # 尝试 20 次寻找另一个 Flow
+                        random_document_index = random.randint(0, len(all_documents) - 1)
+                        if random_document_index != document_index:
+                            break
+                    if random_document_index == document_index:
+                        random_document_index = (document_index + 1) % len(all_documents)
+
+                    random_document = all_documents[random_document_index]
+                    random_start = random.randint(0, len(random_document) - 1)
+                    burst_ind_end = random_start + 1
+
+                    tokens_b = []
+                    for burst_ind in range(random_start, burst_ind_end):
+                        for j in range(len(random_document[burst_ind])):
+                            tokens_b.extend(random_document[burst_ind][j])
+                            if len(tokens_b) >= next_burst_max_length:
+                                break
+
+                    truncate_seq_pair(tokens_a, tokens_b, max_num_tokens)
+                    label = 5
+
+                    # 构建输入序列
+                    src = []
+                    src.append(self.vocab.get(CLS_TOKEN))
+                    src.extend(tokens_a)
+                    src.append(self.vocab.get(SEP_TOKEN))
+                    seg_pos = [len(src)]
+                    src.extend(tokens_b)
                     src.append(self.vocab.get(SEP_TOKEN))
                     seg_pos.append(len(src))
 

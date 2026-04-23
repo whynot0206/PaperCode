@@ -6,6 +6,7 @@ import torch.nn.functional as F
 class ProtocolRouter(nn.Module):
     def __init__(self, num_experts, hidden_size, noise_std=0.01,
                  balance_weight=0.2, entropy_weight=1.0, target_entropy=0.6,
+                 router_feature="mean",
                  rank1_weight=0.0, rank2_weight=0.0, rank_target_entropy=0.45,
                  specialization_weight=1.0, margin_weight=1.0,
                  target_margin=0.20, decorrelation_weight=0.5):
@@ -15,6 +16,7 @@ class ProtocolRouter(nn.Module):
         self.balance_weight = balance_weight
         self.entropy_weight = entropy_weight
         self.target_entropy = target_entropy
+        self.router_feature = router_feature
         self.rank1_weight = rank1_weight
         self.rank2_weight = rank2_weight
         self.rank_target_entropy = rank_target_entropy
@@ -59,29 +61,8 @@ class ProtocolRouter(nn.Module):
         entropy_target_loss = (self._normalized_entropy(rank_prob) - self.rank_target_entropy) ** 2
         return self.balance_weight * uniform_balance + self.entropy_weight * entropy_target_loss
 
-    def _specialization_regularizer(self, router_probs):
-        margin_loss = router_probs.new_zeros(())
-        if self.num_experts > 1:
-            top2_probs = torch.topk(router_probs, k=2, dim=-1).values
-            routing_margin = top2_probs[:, 0] - top2_probs[:, 1]
-            margin_loss = F.relu(self.target_margin - routing_margin).mean()
-
-        decorrelation_loss = router_probs.new_zeros(())
-        if router_probs.size(0) > 1 and self.num_experts > 1:
-            centered = router_probs - router_probs.mean(dim=0, keepdim=True)
-            covariance = centered.transpose(0, 1) @ centered / max(router_probs.size(0), 1)
-            off_diagonal = covariance - torch.diag_embed(torch.diagonal(covariance))
-            decorrelation_loss = off_diagonal.pow(2).mean()
-
-        return self.specialization_weight * (
-            self.margin_weight * margin_loss +
-            self.decorrelation_weight * decorrelation_loss
-        )
-
     def forward(self, proto_ids=None, inputs_embeds=None, top_k=1):
-        """
-        实现 Traffic-MoE 的 Formula 5 (Routing) 和 Formula 9 (Aux Loss)
-        """
+
         # [batch_size, hidden_size]
         # 使用 [CLS] 或 mean pooling 作为路由特征
         # router_input = torch.mean(inputs_embeds[:, :32, :], dim=1)
@@ -103,15 +84,18 @@ class ProtocolRouter(nn.Module):
         # 3. 把 Padding 位置的特征强行清零
         masked_embeds = inputs_embeds * mask_expanded
 
-        # 4. 对有效特征求和 [batch_size, hidden_size]
-        sum_embeds = torch.sum(masked_embeds, dim=1)
+        if self.router_feature == "cls":
+            router_input = inputs_embeds[:, 0, :]
+        else:
+            # 4. 对有效特征求和 [batch_size, hidden_size]
+            sum_embeds = torch.sum(masked_embeds, dim=1)
 
-        # 5. 计算每个样本真实的有效长度 [batch_size, 1]
-        # 使用 clamp(min=1e-9) 防止除以 0 的崩溃
-        valid_lengths = torch.sum(mask, dim=1, keepdim=True).clamp(min=1e-9)
+            # 5. 计算每个样本真实的有效长度 [batch_size, 1]
+            # 使用 clamp(min=1e-9) 防止除以 0 的崩溃
+            valid_lengths = torch.sum(mask, dim=1, keepdim=True).clamp(min=1e-9)
 
-        # 6. 计算真正的、纯净的均值特征！
-        router_input = sum_embeds / valid_lengths
+            # 6. 计算真正的、纯净的均值特征！
+            router_input = sum_embeds / valid_lengths
 
         # ================= Formula 5: Routing Logic =================
         # 1. 计算 Logits
@@ -172,30 +156,10 @@ class ProtocolRouter(nn.Module):
 
         entropy_target_loss = (norm_entropy - self.target_entropy) ** 2
 
-        margin_component = router_probs.new_zeros(())
-        decorrelation_component = router_probs.new_zeros(())
-        if self.num_experts > 1:
-            top2_probs = torch.topk(router_probs, k=2, dim=-1).values
-            routing_margin = top2_probs[:, 0] - top2_probs[:, 1]
-            margin_component = self.specialization_weight * self.margin_weight * F.relu(
-                self.target_margin - routing_margin
-            ).mean()
-
-        if router_probs.size(0) > 1 and self.num_experts > 1:
-            centered = router_probs - router_probs.mean(dim=0, keepdim=True)
-            covariance = centered.transpose(0, 1) @ centered / max(router_probs.size(0), 1)
-            off_diagonal = covariance - torch.diag_embed(torch.diagonal(covariance))
-            decorrelation_component = self.specialization_weight * self.decorrelation_weight * off_diagonal.pow(2).mean()
-
-        specialization_loss = margin_component + decorrelation_component
         balance_component = self.balance_weight * uniform_balance
         entropy_component = self.entropy_weight * entropy_target_loss
 
-        load_balance_loss = (
-            specialization_loss +
-            balance_component +
-            entropy_component
-        )
+        load_balance_loss = balance_component + entropy_component
 
         rank_component = router_probs.new_zeros(())
 
@@ -215,15 +179,7 @@ class ProtocolRouter(nn.Module):
                 )
 
         load_balance_loss = load_balance_loss + rank_component
-        self.latest_loss_terms = {
-            "router_total": load_balance_loss.detach(),
-            "router_specialization": specialization_loss.detach(),
-            "router_margin": margin_component.detach(),
-            "router_decorrelation": decorrelation_component.detach(),
-            "router_balance": balance_component.detach(),
-            "router_entropy": entropy_component.detach(),
-            "router_rank": rank_component.detach(),
-        }
+        self.latest_loss_terms = {}
 
         # ================= 统计更新 =================
         with torch.no_grad():
